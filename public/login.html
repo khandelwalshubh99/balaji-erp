@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in · Balaji Enterprises</title>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body class="login-page">
+  <form class="login-card" id="form">
+    <h1>Balaji Enterprises</h1>
+    <p class="sub">Operations dashboard · internal use</p>
+
+    <label for="username">Username</label>
+    <input id="username" name="username" autocomplete="username" autofocus required />
+
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required />
+
+    <button type="submit" id="submit">Sign in</button>
+    <div class="login-error" id="error"></div>
+
+    <p class="login-hint">
+      This screen exists because the dashboard shows receivables and margin data.
+      Seeded accounts are <code>shubh</code> and <code>rajesh</code> — change the passwords before
+      putting this on the office network.
+    </p>
+  </form>
+
+  <script type="module">
+    const form = document.getElementById('form');
+    const err = document.getElementById('error');
+    const btn = document.getElementById('submit');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: form.username.value,
+            password: form.password.value,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Sign in failed');
+        const next = new URLSearchParams(location.search).get('next');
+        location.href = next && next.startsWith('/') ? next : '/';
+      } catch (e2) {
+        err.textContent = e2.message;
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

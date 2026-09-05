@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Balaji Enterprises · Operations</title>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <strong>Balaji Enterprises</strong>
+        <span>Operations</span>
+      </div>
+
+      <div class="nav-section">Phase 1 · Visibility</div>
+      <a class="nav-link" href="#/overview"><i class="dot"></i>Overview</a>
+      <a class="nav-link" href="#/stock"><i class="dot"></i>Stock</a>
+      <a class="nav-link" href="#/receivables"><i class="dot"></i>Receivables</a>
+      <a class="nav-link" href="#/orders"><i class="dot"></i>Orders</a>
+
+      <div class="nav-section">Phase 0 · Foundation</div>
+      <a class="nav-link" href="#/tally"><i class="dot"></i>Tally connection</a>
+      <a class="nav-link" href="#/roadmap"><i class="dot"></i>Roadmap</a>
+
+      <div class="sidebar-foot">
+        <div id="who">&nbsp;</div>
+        <button id="signout" type="button">Sign out</button>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <h1 id="page-title">Overview</h1>
+        <div class="spacer"></div>
+        <span id="mode-pill"></span>
+        <span id="sync-pill"></span>
+        <button class="btn small" id="sync-now" type="button">Sync now</button>
+      </header>
+      <main class="content" id="view"><div class="loading">Loading…</div></main>
+    </div>
+  </div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
