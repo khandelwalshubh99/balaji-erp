@@ -6,21 +6,10 @@
  *
  * Works against the simulated Tally or the real one, depending on .env.
  */
-import { config, isSimulated } from '../src/config.js';
 import { tally } from '../src/tally/client.js';
+import { ensureSimulatedTally } from '../src/tally/ensure-simulated.js';
 
-let stop = () => {};
-if (isSimulated()) {
-  const { startMockTally } = await import('../src/tally/mock-server.js');
-  const h = await startMockTally({
-    port: config.tally.port,
-    seed: config.mock.seed,
-    latencyMs: config.mock.latencyMs,
-    company: config.tally.company,
-  });
-  stop = () => h.server.close();
-  console.log(`(simulated TallyPrime started on port ${h.port})\n`);
-}
+const stop = await ensureSimulatedTally();
 
 const which = process.argv[2] || 'ping';
 const t = tally.target();
