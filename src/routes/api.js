@@ -212,10 +212,32 @@ apiRouter.get('/orders/:id', (req, res) => {
   res.json(order);
 });
 
+apiRouter.get('/orders/check-duplicate', (req, res) =>
+  res.json({
+    duplicates: orders.findDuplicates({
+      customerName: String(req.query.customer || ''),
+      customerPoNumber: String(req.query.po || ''),
+      sourceRef: req.query.sourceRef ? String(req.query.sourceRef) : null,
+      total: Number(req.query.total) || 0,
+    }),
+  })
+);
+
 apiRouter.post('/orders', (req, res) => {
   try {
     res.json(orders.createOrder(req.body || {}, actorOf(req)));
   } catch (err) {
+    // A possible duplicate is a question for the user, not a failure.
+    if (err.code === 'DUPLICATE' || err.code === 'POSSIBLE_DUPLICATE') {
+      return res.status(409).json({
+        error: err.message,
+        code: err.code,
+        duplicates: (err.duplicates || []).map((d) => ({
+          kind: d.kind, conclusive: d.conclusive, reason: d.reason,
+          orderId: d.order.id, orderNumber: d.order.order_number,
+        })),
+      });
+    }
     res.status(400).json({ error: err.message });
   }
 });

@@ -29,6 +29,9 @@ addColumn('quotation_lines', 'remarks', 'TEXT');
 addColumn('orders', 'subtotal', 'REAL DEFAULT 0');
 addColumn('orders', 'tax_amount', 'REAL DEFAULT 0');
 addColumn('orders', 'total', 'REAL DEFAULT 0');
+addColumn('orders', 'source', "TEXT NOT NULL DEFAULT 'manual'");
+addColumn('orders', 'source_ref', 'TEXT');
+addColumn('orders', 'document_url', 'TEXT');
 addColumn('order_lines', 'brand', 'TEXT');
 addColumn('order_lines', 'hsn', 'TEXT');
 
@@ -38,6 +41,18 @@ function dropColumn(table, column) {
   if (has) db.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
 }
 dropColumn('quotations', 'valid_until_pinned');
+
+// Indexes over migrated columns, created after the columns exist. Putting
+// these in the .sql alongside the tables breaks any database that predates
+// the column.
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_source_ref
+    ON orders(source_ref) WHERE source_ref IS NOT NULL;
+  -- Not unique: a customer can legitimately re-issue a PO under the same
+  -- number as an amendment, so same-number orders are surfaced for a decision
+  -- rather than blocked.
+  CREATE INDEX IF NOT EXISTS idx_orders_po_number ON orders(customer_po_number);
+`);
 
 /**
  * Seed the two owner accounts described in Phase 1 ("likely just you and your

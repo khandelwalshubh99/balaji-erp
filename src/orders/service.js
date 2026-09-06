@@ -115,15 +115,98 @@ function refreshStatus(orderId) {
   return status;
 }
 
+/**
+ * Has this purchase order already been recorded?
+ *
+ * Three signals, strongest first. Only the first is conclusive — a customer can
+ * genuinely re-issue a PO under the same number as an amendment, and two orders
+ * of the same value on the same day are perfectly possible. So this reports
+ * what it found and lets the caller decide, except for `source`, which means
+ * the exact same document or email is being imported twice.
+ */
+export function findDuplicates({ customerName, customerPoNumber, sourceRef, total, excludeId = null } = {}) {
+  const hits = [];
+  const notMe = excludeId ? 'AND id != @excludeId' : '';
+
+  if (sourceRef) {
+    const row = db.prepare(`SELECT * FROM orders WHERE source_ref = @sourceRef ${notMe}`)
+      .get({ sourceRef, excludeId });
+    if (row) {
+      hits.push({
+        kind: 'source',
+        conclusive: true,
+        order: row,
+        reason: `Already imported from the same source as ${row.order_number}.`,
+      });
+    }
+  }
+
+  if (customerPoNumber && customerName) {
+    const rows = db.prepare(`
+      SELECT * FROM orders
+      WHERE customer_name = @customerName
+        AND customer_po_number IS NOT NULL
+        AND UPPER(TRIM(customer_po_number)) = UPPER(TRIM(@customerPoNumber))
+        AND status != 'cancelled' ${notMe}`)
+      .all({ customerName, customerPoNumber, excludeId });
+    for (const row of rows) {
+      hits.push({
+        kind: 'po_number',
+        conclusive: false,
+        order: row,
+        reason: `${row.customer_name} already has ${row.order_number} against PO ${row.customer_po_number}.`,
+      });
+    }
+  }
+
+  if (customerName && total > 0) {
+    const rows = db.prepare(`
+      SELECT * FROM orders
+      WHERE customer_name = @customerName AND status != 'cancelled'
+        AND ABS(total - @total) < 0.01
+        AND received_at >= date('now', '-7 day') ${notMe}`)
+      .all({ customerName, total, excludeId });
+    for (const row of rows) {
+      if (hits.some((h) => h.order.id === row.id)) continue;
+      hits.push({
+        kind: 'same_value',
+        conclusive: false,
+        order: row,
+        reason: `${row.order_number} for the same customer and the same value was taken on ${row.received_at}.`,
+      });
+    }
+  }
+
+  return hits;
+}
+
 export function createOrder(input, actor) {
   const {
     customerName, customerGuid, customerPoNumber, poDate, quotationId,
     lines = [], paymentTermsDays, notes, receivedAt,
+    source = 'manual', sourceRef = null, documentUrl = null, allowDuplicate = false,
   } = input;
   if (!customerName) throw new Error('A customer is required');
   if (!lines.length) throw new Error('An order needs at least one line');
 
   const t = totalsFor(asPricing(lines));
+
+  // Re-importing the same document is always a mistake and is refused outright.
+  // Everything softer is a judgement call the caller has to make.
+  const duplicates = findDuplicates({ customerName, customerPoNumber, sourceRef, total: t.total });
+  const conclusive = duplicates.find((d) => d.conclusive);
+  if (conclusive) {
+    const err = new Error(conclusive.reason);
+    err.code = 'DUPLICATE';
+    err.duplicates = duplicates;
+    throw err;
+  }
+  if (duplicates.length && !allowDuplicate) {
+    const err = new Error(duplicates.map((d) => d.reason).join(' '));
+    err.code = 'POSSIBLE_DUPLICATE';
+    err.duplicates = duplicates;
+    throw err;
+  }
   const credit = customerCredit(customerName, t.total);
   const orderNumber = nextOrderNumber();
 
@@ -132,8 +215,9 @@ export function createOrder(input, actor) {
       INSERT INTO orders (order_number, customer_po_number, po_date, quotation_id,
         customer_name, customer_guid, payment_terms_days,
         credit_status, credit_limit_at_order, outstanding_at_order, overdue_at_order,
-        subtotal, tax_amount, total, status, received_at, notes, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`)
+        subtotal, tax_amount, total, status, received_at, notes, created_by,
+        source, source_ref, document_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)`)
       .run(
         orderNumber, customerPoNumber || null, poDate || null, quotationId || null,
         customerName, customerGuid || credit?.guid || null,
@@ -141,7 +225,8 @@ export function createOrder(input, actor) {
         credit?.status || 'unknown',
         credit?.creditLimit || 0, credit?.outstanding || 0, credit?.overdue || 0,
         t.subtotal, t.taxAmount, t.total,
-        receivedAt || todayISO(), notes || null, actor?.id || null
+        receivedAt || todayISO(), notes || null, actor?.id || null,
+        source, sourceRef, documentUrl
       );
     const id = info.lastInsertRowid;
     writeLines(id, lines);

@@ -126,6 +126,14 @@ CREATE TABLE IF NOT EXISTS orders (
   tax_amount      REAL DEFAULT 0,
   total           REAL DEFAULT 0,
 
+  -- Where this order came from, and how to get back to the original document.
+  -- source_ref is whatever uniquely identifies the thing it was created from:
+  -- a Drive file id, a Gmail message id, a sheet row key. It is unique, so the
+  -- same source can never quietly produce two orders.
+  source          TEXT NOT NULL DEFAULT 'manual', -- manual|import|email|api
+  source_ref      TEXT,
+  document_url    TEXT,
+
   status          TEXT NOT NULL DEFAULT 'open', -- open|part_dispatched|dispatched|closed|cancelled
   cancelled_reason TEXT,
   received_at     TEXT NOT NULL,
