@@ -3,8 +3,10 @@
 A self-hosted, Tally-connected dashboard, built to the phased plan in
 `Balaji_Enterprises_Custom_ERP_Plan.docx`.
 
-**Built so far: Phase 0 and Phase 1.** Phase 2 (shared order-state across
-Quotations / Accounts / Dispatch) is next and is where the actual payoff is.
+**Built so far: Phase 0, Phase 1, and the first stage of Phase 2.** The RFQ →
+Quotation → Order → Dispatch → Invoice model is in the database; Quotations is
+the first of those stages with a screen. Order Received onwards is next, and is
+where the actual payoff is.
 
 Right now it runs against a **simulated TallyPrime** so the whole thing can be
 used and judged before anyone touches the office machine.
@@ -64,13 +66,16 @@ src/tally/
   client.js      HTTP transport + error classification    <- runs against both
   parse.js       UTF-16 decoding, "142 Nos", sign conventions
   mock-server.js a fake TallyPrime on port 9000           <- deleted at cutover
-  mock-data.js   645 SKUs, 65 customers, 139 open bills, 120 days of vouchers
+  mock-data.js   stocks the real catalogue; invents customers, bills, vouchers
 ```
 
-The simulated dataset is deterministic (seeded by `MOCK_SEED`), sized and priced
-like an industrial tools and MRO distributor: Taparia, Stanley, DeWalt, Groz,
-Deneers and friends, Indore/Pithampur customer names, ~₹2.5 Cr of stock, ~₹1.8 Cr
-of receivables, ~₹1 Cr of monthly sales.
+The simulated dataset is deterministic (seeded by `MOCK_SEED`). Stock items are
+the **real** catalogue once a price list has been imported — the fake Tally
+stocks about 3,700 of the 12,261 SKUs, names them inconsistently and leaves the
+part number blank on a fifth of them, deliberately, so the catalogue matcher is
+tested against realistic name drift rather than tidy data. Customers, bills and
+vouchers are invented: ~65 Indore/Pithampur names, ~₹3 Cr of stock, ~₹1.9 Cr of
+receivables, ~₹1.1 Cr of monthly sales.
 
 ### Cutting over to the real Tally
 
