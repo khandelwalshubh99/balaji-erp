@@ -97,12 +97,17 @@ async function composer(el, id) {
 
   const readOnly = () => model.status !== 'draft';
 
+  // Discount off the gross, GST on what is left — the same order the existing
+  // quotation tool uses, and the same order the server recomputes on save.
+  const n = (v) => Number(v) || 0;
+  const taxableOf = (l) => n(l.qty) * n(l.rate) * (1 - n(l.discountPct) / 100);
+  const gstOf = (l) => (taxableOf(l) * n(l.gstRate)) / 100;
+
   const lineTotals = () =>
     model.lines.reduce(
       (a, l) => {
-        const taxable = (Number(l.qty) || 0) * (Number(l.rate) || 0) * (1 - (Number(l.discountPct) || 0) / 100);
-        a.subtotal += taxable;
-        a.tax += (taxable * (Number(l.gstRate) || 0)) / 100;
+        a.subtotal += taxableOf(l);
+        a.tax += gstOf(l);
         return a;
       },
       { subtotal: 0, tax: 0 }
@@ -175,9 +180,9 @@ async function composer(el, id) {
           <div style="height:14px"></div>
 
           ${raw(card('Totals', `<div class="totals">
-            <div class="row"><span class="dim">Subtotal</span><span>${rupees2(t.subtotal)}</span></div>
-            <div class="row"><span class="dim">GST</span><span>${rupees2(t.tax)}</span></div>
-            <div class="row grand"><span>Total</span><span>${rupees2(t.subtotal + t.tax)}</span></div>
+            <div class="row"><span class="dim">Subtotal</span><span id="t-subtotal">${rupees2(t.subtotal)}</span></div>
+            <div class="row"><span class="dim">GST</span><span id="t-gst">${rupees2(t.tax)}</span></div>
+            <div class="row grand"><span>Total</span><span id="t-total">${rupees2(t.subtotal + t.tax)}</span></div>
           </div>`))}
 
           ${raw(model.versions.length > 1 ? `<div style="height:14px"></div>${card('Revisions',
@@ -209,8 +214,13 @@ async function composer(el, id) {
         <div class="row"><span class="dim">Credit limit</span><span>${credit.creditLimit ? money(credit.creditLimit) : 'none set'}</span></div>
         <div class="row"><span class="dim">Payment terms</span><span>${credit.creditPeriodDays} days</span></div>
         <div class="row"><span class="dim">Open bills</span><span>${credit.openBills}</span></div>
+        <div class="row" style="border-top:1px solid var(--border);padding-top:7px;margin-top:2px">
+          <span class="dim">With this quote</span><span id="c-after">—</span>
+        </div>
+        <div id="c-after-flag"></div>
         <div style="margin-top:4px"><span class="pill ${tone}">${label}</span></div>
       </div>`, { note: 'from Tally' });
+    recalcCreditProjection(lineTotals().subtotal + lineTotals().tax);
   }
 
   function drawLines() {
@@ -221,22 +231,19 @@ async function composer(el, id) {
     }
     body.innerHTML = model.lines
       .map((l, i) => {
-        const taxable = (Number(l.qty) || 0) * (Number(l.rate) || 0) * (1 - (Number(l.discountPct) || 0) / 100);
-        const off = l.listRate && l.rate && l.rate < l.listRate
-          ? `<span class="faint"> · list ${rupees2(l.listRate)}</span>` : '';
         const ro = readOnly() ? 'disabled' : '';
         return `<tr>
           <td class="faint">${i + 1}</td>
           <td>
             <div class="truncate" title="${esc(l.itemName)}">${esc(l.itemName)}</div>
-            <div class="faint mono" style="font-size:11px">${esc(l.itemCode || '')}${esc(l.brand ? ` · ${l.brand}` : '')}${off}</div>
+            <div class="faint mono" style="font-size:11px">${esc(l.itemCode || '')}${esc(l.brand ? ` · ${l.brand}` : '')}<span data-listnote="${i}">${listNote(l)}</span></div>
           </td>
           <td><input data-i="${i}" data-k="qty" value="${l.qty}" ${ro} /></td>
           <td><input class="text" data-i="${i}" data-k="units" value="${esc(l.units || '')}" ${ro} /></td>
           <td><input data-i="${i}" data-k="rate" value="${l.rate}" ${ro} /></td>
           <td><input data-i="${i}" data-k="discountPct" value="${l.discountPct || 0}" ${ro} /></td>
           <td><input data-i="${i}" data-k="gstRate" value="${l.gstRate || 0}" ${ro} /></td>
-          <td class="num">${rupees2(taxable)}</td>
+          <td class="num" data-amount="${i}">${rupees2(taxableOf(l))}</td>
           <td>${readOnly() ? '' : `<button class="del" data-del="${i}" title="Remove">×</button>`}</td>
         </tr>`;
       })
@@ -287,14 +294,20 @@ async function composer(el, id) {
     el.querySelector('#valid')?.addEventListener('change', (e) => { model.validUntil = e.target.value; });
     el.querySelector('#notes')?.addEventListener('input', (e) => { model.notes = e.target.value; });
 
-    el.querySelectorAll('.lines input[data-k]').forEach((input) =>
-      input.addEventListener('change', () => {
-        const { i, k } = input.dataset;
-        model.lines[Number(i)][k] = k === 'units' ? input.value : Number(input.value) || 0;
-        drawLines();
-        refreshTotals();
-      })
-    );
+    // Recalculate on every keystroke. Deliberately does NOT redraw the row —
+    // rebuilding the table under the cursor would drop focus and the caret
+    // position mid-number. Only the figures that changed are rewritten.
+    el.querySelectorAll('.lines input[data-k]').forEach((input) => {
+      const apply = () => {
+        const i = Number(input.dataset.i);
+        const k = input.dataset.k;
+        model.lines[i][k] = k === 'units' ? input.value : Number(input.value) || 0;
+        recalcLine(i);
+        recalcTotals();
+      };
+      input.addEventListener('input', apply);
+      input.addEventListener('change', apply);
+    });
     el.querySelectorAll('[data-del]').forEach((btn) =>
       btn.addEventListener('click', () => {
         model.lines.splice(Number(btn.dataset.del), 1);
@@ -306,13 +319,53 @@ async function composer(el, id) {
     wireActions();
   }
 
-  function refreshTotals() {
+  /** "· list ₹640.00" — shown only while the quoted rate is under list. */
+  function listNote(l) {
+    return l.listRate && n(l.rate) && n(l.rate) < l.listRate
+      ? ` · list ${rupees2(l.listRate)}`
+      : '';
+  }
+
+  function recalcLine(i) {
+    const line = model.lines[i];
+    const amount = el.querySelector(`[data-amount="${i}"]`);
+    if (amount) amount.textContent = rupees2(taxableOf(line));
+    const note = el.querySelector(`[data-listnote="${i}"]`);
+    if (note) note.textContent = listNote(line);
+  }
+
+  function recalcTotals() {
     const t = lineTotals();
-    const rows = el.querySelectorAll('.totals .row');
-    if (rows.length >= 3) {
-      rows[0].lastElementChild.textContent = rupees2(t.subtotal);
-      rows[1].lastElementChild.textContent = rupees2(t.tax);
-      rows[2].lastElementChild.textContent = rupees2(t.subtotal + t.tax);
+    const set = (id, value) => {
+      const node = el.querySelector(id);
+      if (node) node.textContent = rupees2(value);
+    };
+    set('#t-subtotal', t.subtotal);
+    set('#t-gst', t.tax);
+    set('#t-total', t.subtotal + t.tax);
+    recalcCreditProjection(t.subtotal + t.tax);
+  }
+
+  /**
+   * What this quote would do to the customer's exposure. Credit is reported
+   * rather than enforced, so the least it can do is answer the question live
+   * while the quote is still being priced.
+   */
+  function recalcCreditProjection(quoteTotal) {
+    if (!credit) return;
+    const after = credit.outstanding + quoteTotal;
+    const over = credit.creditLimit > 0 && after > credit.creditLimit;
+
+    const value = el.querySelector('#c-after');
+    if (value) {
+      value.textContent = money(after);
+      value.className = over ? 'bad' : '';
+    }
+    const flag = el.querySelector('#c-after-flag');
+    if (flag) {
+      flag.innerHTML = over
+        ? `<span class="pill bad">This quote takes them ${money(after - credit.creditLimit)} past their limit</span>`
+        : '';
     }
   }
 
