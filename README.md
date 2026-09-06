@@ -3,10 +3,10 @@
 A self-hosted, Tally-connected dashboard, built to the phased plan in
 `Balaji_Enterprises_Custom_ERP_Plan.docx`.
 
-**Built so far: Phase 0, Phase 1, and the first stage of Phase 2.** The RFQ →
-Quotation → Order → Dispatch → Invoice model is in the database; Quotations is
-the first of those stages with a screen. Order Received onwards is next, and is
-where the actual payoff is.
+**Built so far: Phase 0, Phase 1, and Phase 2 up to Order Received.** The
+RFQ → Quotation → Order → Dispatch → Invoice model is in the database;
+Quotations and Orders have screens. Picking and dispatch is next — that is the
+stage that stops a short shipment being discovered days later.
 
 Right now it runs against a **simulated TallyPrime** so the whole thing can be
 used and judged before anyone touches the office machine.
@@ -122,6 +122,19 @@ tool could not hold: a customer, a quote number, and revisions. A quotation
 that has been marked sent is locked — it is the record of what the customer was
 given — and *Revise* creates the next version alongside it.
 
+**Orders** *(Phase 2)* — the customer's purchase order, recorded once. Convert
+an accepted quotation (rates carry across with the discount folded in) or enter
+one directly. The credit position is **snapshotted as the order is taken** —
+what their exposure looked like at that moment, which is what makes it
+reviewable later; a live figure would quietly rewrite history every time a bill
+was paid. Credit is reported, never blocking.
+
+Order status is **derived from its dispatches**, not set by hand: open →
+part dispatched → dispatched follows from how much of each line has actually
+left. Nobody has to remember to mark an order part-shipped, which is the whole
+point. An order that has shipped in part or full can no longer be edited or
+cancelled — adjust the dispatch instead.
+
 **Catalogue** — all 12,261 price-list SKUs with their Tally match state. See
 "The catalogue and the price list" below.
 
@@ -135,10 +148,11 @@ plier`, `safety shoes uk 8`), filterable by category and stock level.
 click through to bill-by-bill. Credit limits are read from the Tally ledger and
 only *reported*; nothing is enforced until Phase 4.
 
-**Orders** — pending vs dispatched. Read the warning on that screen: an order
-counts as dispatched only because a delivery note in Tally quotes its
-sales-order number. Inconsistent references make orders look pending forever.
-This is inference, and Phase 2 exists to replace it.
+**Tally orders** — the Phase 1 inferred view: sales orders read straight out of
+Tally, counted as dispatched only because a delivery note quotes the sales-order
+number. Inconsistent references make orders look pending forever. It stays
+useful for orders raised directly in Tally and for anything placed before this
+system, but orders taken here live under **Orders**, where nothing is inferred.
 
 **Tally connection** — Phase 0 lives here permanently: connection test, last
 sync with per-dataset record counts, sync history, and an XML console that sends

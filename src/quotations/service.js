@@ -251,35 +251,3 @@ export function listQuotations({ status = '', search = '', limit = 100 } = {}) {
       ORDER BY q.updated_at DESC LIMIT @limit`)
     .all({ ...params, limit });
 }
-
-/** Customers, with the credit picture Phase 1 already syncs from Tally. */
-export function customers(search = '') {
-  const params = {};
-  let clause = 'is_customer = 1';
-  if (search) { clause += ' AND name LIKE @q'; params.q = `%${search}%`; }
-  return db
-    .prepare(`SELECT guid, name, outstanding, credit_limit, credit_period_days, phone, state, gstin
-              FROM tally_ledgers WHERE ${clause} ORDER BY name LIMIT 400`)
-    .all(params);
-}
-
-/** Overdue exposure for one customer, for the panel shown while quoting. */
-export function customerCredit(name) {
-  const ledger = db.prepare('SELECT * FROM tally_ledgers WHERE name = ? AND is_customer = 1').get(name);
-  if (!ledger) return null;
-  const bills = db.prepare('SELECT bill_date, due_date, amount FROM tally_bills WHERE party_name = ?').all(name);
-  const today = new Date();
-  const overdue = bills
-    .filter((b) => b.due_date && new Date(`${b.due_date}T00:00:00`) < today)
-    .reduce((s, b) => s + b.amount, 0);
-  return {
-    name: ledger.name,
-    guid: ledger.guid,
-    outstanding: ledger.outstanding,
-    creditLimit: ledger.credit_limit,
-    creditPeriodDays: ledger.credit_period_days,
-    overdue,
-    openBills: bills.length,
-    overLimit: ledger.credit_limit > 0 && ledger.outstanding > ledger.credit_limit,
-  };
-}

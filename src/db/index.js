@@ -26,6 +26,11 @@ addColumn('quotations', 'quote_date', 'TEXT');
 addColumn('quotation_lines', 'brand', 'TEXT');
 addColumn('quotation_lines', 'hsn', 'TEXT');
 addColumn('quotation_lines', 'remarks', 'TEXT');
+addColumn('orders', 'subtotal', 'REAL DEFAULT 0');
+addColumn('orders', 'tax_amount', 'REAL DEFAULT 0');
+addColumn('orders', 'total', 'REAL DEFAULT 0');
+addColumn('order_lines', 'brand', 'TEXT');
+addColumn('order_lines', 'hsn', 'TEXT');
 
 /** Columns that were tried and are no longer used. */
 function dropColumn(table, column) {

@@ -296,6 +296,9 @@ async function composer(el, id) {
         buttons.push('<button class="btn small" id="won">Accepted</button>');
         buttons.push('<button class="btn small" id="lost">Lost…</button>');
       }
+      if (model.status === 'accepted') {
+        buttons.push('<button class="btn primary small" id="toorder">Create order →</button>');
+      }
     }
     if (model.id) {
       buttons.push('<button class="btn small" id="copy">Copy for email</button>');
@@ -514,6 +517,9 @@ async function composer(el, id) {
     el.querySelector('#revise')?.addEventListener('click', async () => {
       const rev = await api(`/quotations/${model.id}/revise`, { method: 'POST' });
       goTo(rev.id);
+    });
+    el.querySelector('#toorder')?.addEventListener('click', () => {
+      location.hash = `#/orders?id=new&quotation=${model.id}`;
     });
     el.querySelector('#won')?.addEventListener('click', async () => {
       await api(`/quotations/${model.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'accepted' }) });

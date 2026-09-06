@@ -16,10 +16,28 @@ const PHASES = [
     what: 'Stock, receivables ageing and a pending-vs-dispatched snapshot, mirrored from Tally on a timer. Nobody types anything new.',
   },
   {
-    n: '2',
-    name: 'Shared order-state across departments',
+    n: '2a',
+    name: 'Quotations',
+    state: 'built',
+    what: 'Quote off the 12,000-SKU catalogue with live Tally stock and the rate this customer last paid. Versioned, and locked once sent.',
+  },
+  {
+    n: '2b',
+    name: 'Order received',
+    state: 'built',
+    what: 'The customer PO recorded once, converted from an accepted quotation or entered directly. Credit position is snapshotted as it is taken — reported, not enforced.',
+  },
+  {
+    n: '2c',
+    name: 'Picking, dispatch and LR',
     state: 'next',
-    what: 'Quotation → Order Confirmed → Accounts Cleared → Packed → Dispatched → Invoiced, with a screen per department. This is the phase that actually stops dispatch shipping before payment clears.',
+    what: 'What actually leaves the godown, against what was ordered: short shipments and substitutions recorded as they happen, with the LR and transporter. Order status is already derived from this, so the plumbing is in place.',
+  },
+  {
+    n: '2d',
+    name: 'Invoice and payment due',
+    state: 'later',
+    what: 'Each dispatch invoiced, each invoice tied to its Tally bill, and the payment clock read from Tally rather than run here.',
   },
   {
     n: '3',
@@ -59,8 +77,11 @@ export async function render(el) {
         <li>This is a <strong>mirror of Tally</strong>, refreshed on a timer. It is minutes behind, by design.</li>
         <li>It does not yet change who talks to whom. Phase 1 makes information faster to see; it does not stop
             a dispatch going out before accounts have cleared it.</li>
-        <li>Order stages on the Orders screen are <em>inferred</em> from how delivery notes reference sales orders
-            in Tally. That inference breaks whenever a reference is typed inconsistently.</li>
+        <li><strong>Tally orders</strong> is still <em>inference</em> — it reads sales orders out of Tally and guesses
+            at dispatch from delivery-note references. It stays useful for orders raised directly in Tally, but
+            anything taken through <strong>Orders</strong> is a real record and needs no guessing.</li>
+        <li>Credit is <strong>reported, not enforced</strong>. An order over the customer's limit is flagged on the
+            order and in the list, and nothing stops it. Making that a gate is a rule change, not a rebuild.</li>
         <li>Nothing is written back to Tally. Not until Phase 2 has been running cleanly for a while.</li>
       </ul>`
     ))}

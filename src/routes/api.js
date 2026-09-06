@@ -5,6 +5,8 @@ import { runSync, syncStatus } from '../sync/engine.js';
 import { tally } from '../tally/client.js';
 import { searchCatalogue, catalogueFacets, matchSummary, unmatchedItems, orphanStockItems, matchCatalogue, lastRateFor } from '../catalogue/match.js';
 import * as quotes from '../quotations/service.js';
+import { listCustomers, customerCredit } from '../customers/service.js';
+import * as orders from '../orders/service.js';
 import { renderQuotationHtml, renderQuotationText, DEFAULT_TERMS } from '../quotations/render.js';
 import { QUOTE_VALIDITY_DAYS } from '../quotations/service.js';
 
@@ -32,7 +34,7 @@ apiRouter.get('/stock', (req, res) => {
 
 apiRouter.get('/receivables', (_req, res) => res.json(q.receivables()));
 
-apiRouter.get('/orders', (req, res) => res.json(q.orderSnapshot({ days: num(req.query.days, 45) })));
+apiRouter.get('/tally-orders', (req, res) => res.json(q.orderSnapshot({ days: num(req.query.days, 45) })));
 
 apiRouter.get('/reorder', (req, res) => res.json({ items: q.reorderList(num(req.query.limit, 60)) }));
 
@@ -126,11 +128,11 @@ apiRouter.get('/catalogue/last-rate', (req, res) =>
 const actorOf = (req) => req.session?.user || null;
 
 apiRouter.get('/customers', (req, res) =>
-  res.json({ customers: quotes.customers(String(req.query.search || '')) })
+  res.json({ customers: listCustomers(String(req.query.search || '')) })
 );
 
 apiRouter.get('/customers/:name/credit', (req, res) => {
-  const credit = quotes.customerCredit(req.params.name);
+  const credit = customerCredit(req.params.name, Number(req.query.value) || 0);
   if (!credit) return res.status(404).json({ error: 'No such customer in the synced ledgers' });
   res.json(credit);
 });
@@ -183,5 +185,57 @@ apiRouter.post('/quotations/:id/status', (req, res) => {
     res.json(q);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// --- orders (Phase 2 "Order Received") --------------------------------------
+apiRouter.get('/orders', (req, res) =>
+  res.json({
+    orders: orders.listOrders({
+      status: String(req.query.status || ''),
+      search: String(req.query.search || ''),
+      limit: num(req.query.limit, 100),
+    }),
+    summary: orders.orderSummary(),
+  })
+);
+
+apiRouter.get('/orders/new', (req, res) => {
+  const fromQuote = req.query.quotation ? orders.orderDraftFromQuotation(Number(req.query.quotation)) : null;
+  if (req.query.quotation && !fromQuote) return res.status(404).json({ error: 'No such quotation' });
+  res.json({ orderNumber: orders.nextOrderNumber(), draft: fromQuote });
+});
+
+apiRouter.get('/orders/:id', (req, res) => {
+  const order = orders.getOrder(Number(req.params.id));
+  if (!order) return res.status(404).json({ error: 'No such order' });
+  res.json(order);
+});
+
+apiRouter.post('/orders', (req, res) => {
+  try {
+    res.json(orders.createOrder(req.body || {}, actorOf(req)));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/orders/:id', (req, res) => {
+  try {
+    const order = orders.updateOrder(Number(req.params.id), req.body || {}, actorOf(req));
+    if (!order) return res.status(404).json({ error: 'No such order' });
+    res.json(order);
+  } catch (err) {
+    res.status(409).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/orders/:id/cancel', (req, res) => {
+  try {
+    const order = orders.cancelOrder(Number(req.params.id), req.body?.reason, actorOf(req));
+    if (!order) return res.status(404).json({ error: 'No such order' });
+    res.json(order);
+  } catch (err) {
+    res.status(409).json({ error: err.message });
   }
 });

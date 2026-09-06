@@ -122,6 +122,10 @@ CREATE TABLE IF NOT EXISTS orders (
   overdue_at_order        REAL DEFAULT 0,
   credit_note       TEXT,
 
+  subtotal        REAL DEFAULT 0,
+  tax_amount      REAL DEFAULT 0,
+  total           REAL DEFAULT 0,
+
   status          TEXT NOT NULL DEFAULT 'open', -- open|part_dispatched|dispatched|closed|cancelled
   cancelled_reason TEXT,
   received_at     TEXT NOT NULL,
@@ -145,6 +149,10 @@ CREATE TABLE IF NOT EXISTS order_lines (
   rate        REAL NOT NULL DEFAULT 0,
   gst_rate    REAL DEFAULT 0,
   amount      REAL NOT NULL DEFAULT 0,
+  -- Snapshotted like quotation lines: what was ordered must keep reading the
+  -- same after the next price list import.
+  brand       TEXT,
+  hsn         TEXT,
   notes       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_order_lines_order ON order_lines(order_id);

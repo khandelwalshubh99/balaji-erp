@@ -7,6 +7,7 @@ const ROUTES = {
   quotations: () => import('./views/quotations.js'),
   receivables: () => import('./views/receivables.js'),
   orders: () => import('./views/orders.js'),
+  'tally-orders': () => import('./views/tally-orders.js'),
   tally: () => import('./views/tally.js'),
   roadmap: () => import('./views/roadmap.js'),
 };
