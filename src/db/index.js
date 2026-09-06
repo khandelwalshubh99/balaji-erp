@@ -10,8 +10,12 @@ export const db = new Database(config.dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
-const schema = fs.readFileSync(path.join(config.root, 'src', 'db', 'schema.sql'), 'utf8');
-db.exec(schema);
+// Applied in order on every boot. Each file must be idempotent (CREATE TABLE
+// IF NOT EXISTS), so starting the app is always safe regardless of which
+// phases were present last time.
+for (const file of ['schema.sql', 'phase2.sql']) {
+  db.exec(fs.readFileSync(path.join(config.root, 'src', 'db', file), 'utf8'));
+}
 
 /**
  * Seed the two owner accounts described in Phase 1 ("likely just you and your
