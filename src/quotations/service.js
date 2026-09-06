@@ -17,33 +17,38 @@ const nowIso = () => new Date().toISOString();
  */
 export const QUOTE_VALIDITY_DAYS = 15;
 
+/** Financial-year tag, Tally style: April 2026 -> "2627". */
+function fyTag(date = new Date()) {
+  const y = date.getMonth() + 1 >= 4 ? date.getFullYear() : date.getFullYear() - 1;
+  return `${String(y).slice(2)}${String(y + 1).slice(2)}`;
+}
+
 /**
  * Resolve a quotation's two dates.
  *
- * Valid-until always follows the quotation date, unless someone has set it
- * deliberately for this quotation. That rule lives here rather than in the
- * browser so it holds however the record is changed — a client that sends only
- * a new date still gets a correctly re-derived expiry.
+ * Whichever of the two was edited last wins:
+ *   - the expiry was set by hand  -> keep it, it is a deliberate date
+ *   - the quotation date moved    -> the expiry goes back to date + 15 days,
+ *                                    discarding any earlier custom value
+ *
+ * So a custom expiry only survives while it is the more recent decision. This
+ * lives in the service rather than the browser so it holds however the record
+ * is changed, including an API call that sends only one of the two.
+ *
+ * It also means nothing has to be stored to remember which was edited last: an
+ * expiry that is not date + 15 can only have got that way by being set after
+ * the date was, so the values alone say which it was.
  */
 function datesFor({ quoteDate, validUntil } = {}, existing = null) {
   const date = quoteDate || existing?.quote_date || todayISO();
   const derived = addDaysISO(date, QUOTE_VALIDITY_DAYS);
 
-  if (validUntil) {
-    // Supplying an expiry that is not the derived one is what pins it.
-    return { quoteDate: date, validUntil, pinned: validUntil !== derived ? 1 : 0 };
-  }
-  // Nothing supplied: keep a pinned expiry, otherwise track the date.
-  if (existing?.valid_until_pinned && existing.valid_until) {
-    return { quoteDate: date, validUntil: existing.valid_until, pinned: 1 };
-  }
-  return { quoteDate: date, validUntil: derived, pinned: 0 };
-}
+  const dateChanged = Boolean(quoteDate) && quoteDate !== existing?.quote_date;
+  const expiryGiven = Boolean(validUntil) && validUntil !== existing?.valid_until;
 
-/** Financial-year tag, Tally style: April 2026 -> "2627". */
-function fyTag(date = new Date()) {
-  const y = date.getMonth() + 1 >= 4 ? date.getFullYear() : date.getFullYear() - 1;
-  return `${String(y).slice(2)}${String(y + 1).slice(2)}`;
+  if (expiryGiven) return { quoteDate: date, validUntil };
+  if (dateChanged) return { quoteDate: date, validUntil: derived };
+  return { quoteDate: date, validUntil: validUntil || existing?.valid_until || derived };
 }
 
 export function nextQuoteNumber() {
@@ -129,10 +134,10 @@ export function createQuotation({ customerName, customerGuid, rfqId, lines = [],
   const info = db
     .prepare(`
       INSERT INTO quotations (quote_number, version, is_current, rfq_id, customer_name, customer_guid,
-        status, quote_date, valid_until, valid_until_pinned, subtotal, tax_amount, total, notes)
-      VALUES (?, 1, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)`)
+        status, quote_date, valid_until, subtotal, tax_amount, total, notes)
+      VALUES (?, 1, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`)
     .run(quoteNumber, rfqId || null, customerName, customerGuid || null, d.quoteDate, d.validUntil,
-      d.pinned, t.subtotal, t.taxAmount, t.total, notes ?? terms ?? null);
+      t.subtotal, t.taxAmount, t.total, notes ?? terms ?? null);
   const id = info.lastInsertRowid;
   writeLines(id, lines);
   logEvent('quotation', id, 'draft', actor, `${quoteNumber} created`);
@@ -154,11 +159,11 @@ export function updateQuotation(id, { customerName, customerGuid, lines, notes, 
   db.prepare(`
     UPDATE quotations SET customer_name = COALESCE(?, customer_name),
       customer_guid = COALESCE(?, customer_guid), notes = COALESCE(?, notes),
-      quote_date = ?, valid_until = ?, valid_until_pinned = ?,
+      quote_date = ?, valid_until = ?,
       subtotal = ?, tax_amount = ?, total = ?, updated_at = datetime('now')
     WHERE id = ?`)
     .run(customerName ?? null, customerGuid ?? null, notes ?? null,
-      d.quoteDate, d.validUntil, d.pinned, t.subtotal, t.taxAmount, t.total, id);
+      d.quoteDate, d.validUntil, t.subtotal, t.taxAmount, t.total, id);
   if (lines) writeLines(id, lines);
   return getQuotation(id);
 }
@@ -176,8 +181,8 @@ export function reviseQuotation(id, actor) {
     const d = datesFor({});
     const info = db.prepare(`
       INSERT INTO quotations (quote_number, version, is_current, rfq_id, customer_name, customer_guid,
-        status, quote_date, valid_until, valid_until_pinned, subtotal, tax_amount, total, notes)
-      VALUES (?, ?, 1, ?, ?, ?, 'draft', ?, ?, 0, ?, ?, ?, ?)`)
+        status, quote_date, valid_until, subtotal, tax_amount, total, notes)
+      VALUES (?, ?, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`)
       .run(current.quote_number, current.version + 1, current.rfq_id, current.customer_name,
         current.customer_guid, d.quoteDate, d.validUntil, current.subtotal, current.tax_amount,
         current.total, current.notes);

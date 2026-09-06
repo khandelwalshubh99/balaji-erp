@@ -93,10 +93,6 @@ async function composer(el, id) {
     versions: quote?.versions ?? [],
   };
 
-  // Valid-until tracks the quotation date until someone sets it by hand. The
-  // server decides and stores that; this only mirrors it.
-  let validUntilPinned = Boolean(quote?.valid_until_pinned);
-
   let credit = null;
   const loadCredit = async () => {
     credit = model.customerName
@@ -228,10 +224,13 @@ async function composer(el, id) {
     const days = Math.round(
       (Date.parse(`${model.validUntil}T00:00:00`) - Date.parse(`${model.quoteDate}T00:00:00`)) / 86400000
     );
+    // An expiry that is not the derived one was set by hand — no need to
+    // remember that separately.
+    const custom = model.validUntil !== addDaysISO(model.quoteDate, validityDays);
     const lapsed = model.validUntil < todayISO();
     note.innerHTML = lapsed
       ? `<span class="pill bad">Expired</span> validity ran out on ${shortDate(model.validUntil)}`
-      : `Stands for ${days} day${days === 1 ? '' : 's'}${validUntilPinned ? ' (set by hand)' : ''}.`;
+      : `Stands for ${days} day${days === 1 ? '' : 's'}${custom ? ' (set by hand — changing the date resets it)' : ''}.`;
   }
 
   function drawCredit() {
@@ -329,8 +328,10 @@ async function composer(el, id) {
     const validInput = el.querySelector('#valid');
     el.querySelector('#quotedate')?.addEventListener('change', (e) => {
       model.quoteDate = e.target.value;
-      // Re-date the expiry with it, unless it has been set deliberately.
-      if (!validUntilPinned && model.quoteDate) {
+      // Moving the date always resets the expiry, even if it had been set by
+      // hand earlier: whichever of the two was touched last is the decision
+      // that stands.
+      if (model.quoteDate) {
         model.validUntil = addDaysISO(model.quoteDate, validityDays);
         if (validInput) validInput.value = model.validUntil;
       }
@@ -338,7 +339,6 @@ async function composer(el, id) {
     });
     validInput?.addEventListener('change', (e) => {
       model.validUntil = e.target.value;
-      validUntilPinned = true;
       drawValidityNote();
     });
     el.querySelector('#notes')?.addEventListener('input', (e) => { model.notes = e.target.value; });

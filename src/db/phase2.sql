@@ -63,11 +63,10 @@ CREATE TABLE IF NOT EXISTS quotations (
   -- re-dated when it is issued.
   quote_date    TEXT,
   sent_at       TEXT,
+  -- No flag records whether this was set by hand: under the "last edited wins"
+  -- rule, an expiry that is not quote_date + 15 can only have got that way by
+  -- being set after the date, so the value itself is the answer.
   valid_until   TEXT,
-  -- Whether someone set the expiry deliberately. Stored rather than inferred:
-  -- a hand-set date that happens to land on the default is still a decision,
-  -- and re-deriving it from the value alone cannot tell the difference.
-  valid_until_pinned INTEGER NOT NULL DEFAULT 0,
   lost_reason   TEXT,                       -- price|stock|delivery|no-response|other
   subtotal      REAL DEFAULT 0,
   tax_amount    REAL DEFAULT 0,

@@ -23,10 +23,16 @@ function addColumn(table, column, declaration) {
   if (!has) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);
 }
 addColumn('quotations', 'quote_date', 'TEXT');
-addColumn('quotations', 'valid_until_pinned', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('quotation_lines', 'brand', 'TEXT');
 addColumn('quotation_lines', 'hsn', 'TEXT');
 addColumn('quotation_lines', 'remarks', 'TEXT');
+
+/** Columns that were tried and are no longer used. */
+function dropColumn(table, column) {
+  const has = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+  if (has) db.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+}
+dropColumn('quotations', 'valid_until_pinned');
 
 /**
  * Seed the two owner accounts described in Phase 1 ("likely just you and your
