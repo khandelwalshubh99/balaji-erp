@@ -7,8 +7,21 @@
  * overwritten, and a record that outlives one browser's localStorage.
  */
 import { db } from '../db/index.js';
+import { todayISO, addDaysISO } from '../lib/dates.js';
 
 const nowIso = () => new Date().toISOString();
+
+/**
+ * How long a quotation stands. The default terms text quotes the same number,
+ * so both come from here and cannot drift apart.
+ */
+export const QUOTE_VALIDITY_DAYS = 15;
+
+/** Today, unless a date was given; valid-until follows the quotation date. */
+function datesFor({ quoteDate, validUntil } = {}) {
+  const date = quoteDate || todayISO();
+  return { quoteDate: date, validUntil: validUntil || addDaysISO(date, QUOTE_VALIDITY_DAYS) };
+}
 
 /** Financial-year tag, Tally style: April 2026 -> "2627". */
 function fyTag(date = new Date()) {
@@ -92,15 +105,16 @@ function logEvent(entity, id, to, actor, note) {
   ).run(entity, id, to, note || null, actor?.id || null, actor?.name || null);
 }
 
-export function createQuotation({ customerName, customerGuid, rfqId, lines = [], notes, terms, validUntil }, actor) {
+export function createQuotation({ customerName, customerGuid, rfqId, lines = [], notes, terms, quoteDate, validUntil }, actor) {
   const t = totalsFor(lines);
   const quoteNumber = nextQuoteNumber();
+  const d = datesFor({ quoteDate, validUntil });
   const info = db
     .prepare(`
       INSERT INTO quotations (quote_number, version, is_current, rfq_id, customer_name, customer_guid,
-        status, valid_until, subtotal, tax_amount, total, notes)
-      VALUES (?, 1, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)`)
-    .run(quoteNumber, rfqId || null, customerName, customerGuid || null, validUntil || null,
+        status, quote_date, valid_until, subtotal, tax_amount, total, notes)
+      VALUES (?, 1, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`)
+    .run(quoteNumber, rfqId || null, customerName, customerGuid || null, d.quoteDate, d.validUntil,
       t.subtotal, t.taxAmount, t.total, notes ?? terms ?? null);
   const id = info.lastInsertRowid;
   writeLines(id, lines);
@@ -108,7 +122,7 @@ export function createQuotation({ customerName, customerGuid, rfqId, lines = [],
   return getQuotation(id);
 }
 
-export function updateQuotation(id, { customerName, customerGuid, lines, notes, validUntil }, actor) {
+export function updateQuotation(id, { customerName, customerGuid, lines, notes, quoteDate, validUntil }, actor) {
   const existing = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id);
   if (!existing) return null;
   if (existing.status !== 'draft') {
@@ -122,11 +136,11 @@ export function updateQuotation(id, { customerName, customerGuid, lines, notes, 
   db.prepare(`
     UPDATE quotations SET customer_name = COALESCE(?, customer_name),
       customer_guid = COALESCE(?, customer_guid), notes = COALESCE(?, notes),
-      valid_until = COALESCE(?, valid_until), subtotal = ?, tax_amount = ?, total = ?,
-      updated_at = datetime('now')
+      quote_date = COALESCE(?, quote_date), valid_until = COALESCE(?, valid_until),
+      subtotal = ?, tax_amount = ?, total = ?, updated_at = datetime('now')
     WHERE id = ?`)
-    .run(customerName ?? null, customerGuid ?? null, notes ?? null, validUntil ?? null,
-      t.subtotal, t.taxAmount, t.total, id);
+    .run(customerName ?? null, customerGuid ?? null, notes ?? null,
+      quoteDate ?? null, validUntil ?? null, t.subtotal, t.taxAmount, t.total, id);
   if (lines) writeLines(id, lines);
   return getQuotation(id);
 }
@@ -140,12 +154,14 @@ export function reviseQuotation(id, actor) {
   return db.transaction(() => {
     db.prepare(`UPDATE quotations SET is_current = 0, status = 'superseded', updated_at = datetime('now') WHERE quote_number = ? AND is_current = 1`)
       .run(current.quote_number);
+    // A revision goes out today, so it is re-dated and its validity restarts.
+    const d = datesFor({});
     const info = db.prepare(`
       INSERT INTO quotations (quote_number, version, is_current, rfq_id, customer_name, customer_guid,
-        status, valid_until, subtotal, tax_amount, total, notes)
-      VALUES (?, ?, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)`)
+        status, quote_date, valid_until, subtotal, tax_amount, total, notes)
+      VALUES (?, ?, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`)
       .run(current.quote_number, current.version + 1, current.rfq_id, current.customer_name,
-        current.customer_guid, current.valid_until, current.subtotal, current.tax_amount,
+        current.customer_guid, d.quoteDate, d.validUntil, current.subtotal, current.tax_amount,
         current.total, current.notes);
     const newId = info.lastInsertRowid;
     writeLines(newId, lines.map(toLineInput));

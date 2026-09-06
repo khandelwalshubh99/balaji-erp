@@ -6,6 +6,7 @@ import { tally } from '../tally/client.js';
 import { searchCatalogue, catalogueFacets, matchSummary, unmatchedItems, orphanStockItems, matchCatalogue, lastRateFor } from '../catalogue/match.js';
 import * as quotes from '../quotations/service.js';
 import { renderQuotationHtml, renderQuotationText, DEFAULT_TERMS } from '../quotations/render.js';
+import { QUOTE_VALIDITY_DAYS } from '../quotations/service.js';
 
 export const apiRouter = Router();
 
@@ -142,6 +143,7 @@ apiRouter.get('/quotations', (req, res) =>
       limit: num(req.query.limit, 100),
     }),
     defaultTerms: DEFAULT_TERMS,
+    validityDays: QUOTE_VALIDITY_DAYS,
   })
 );
 

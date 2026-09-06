@@ -9,7 +9,7 @@
  * The one addition is the customer block, which the old tool had nowhere to
  * put.
  */
-import { priceLine } from './service.js';
+import { priceLine, QUOTE_VALIDITY_DAYS } from './service.js';
 
 const F = 'font-family:Arial,Helvetica,sans-serif;';
 const esc = (v) =>
@@ -31,7 +31,7 @@ const ddmmyyyy = (iso) => {
 };
 
 export const DEFAULT_TERMS = [
-  'This quotation is valid for 15 days from the date of issue.',
+  `This quotation is valid for ${QUOTE_VALIDITY_DAYS} days from the date of issue.`,
   'Goods once sold will not be taken back unless due to manufacturing defect.',
   'Freight charges are additional unless stated otherwise.',
 ].join('\n');
@@ -63,7 +63,11 @@ export function renderQuotationHtml(quote, { showRemarks = false, logoDataUri = 
   h += `<div style="${F}font-size:11px;letter-spacing:1px;color:#6f6f6f;">QUOTATION NO</div>`;
   h += `<div style="${F}font-size:15px;font-weight:bold;">${esc(quote.quote_number)}${quote.version > 1 ? ` <span style="font-weight:normal;color:#6f6f6f;">rev ${quote.version}</span>` : ''}</div>`;
   h += `<div style="${F}font-size:11px;letter-spacing:1px;color:#6f6f6f;padding-top:6px;">DATE</div>`;
-  h += `<div style="${F}font-size:15px;font-weight:bold;">${ddmmyyyy(quote.created_at)}</div>`;
+  h += `<div style="${F}font-size:15px;font-weight:bold;">${ddmmyyyy(quote.quote_date || quote.created_at)}</div>`;
+  if (quote.valid_until) {
+    h += `<div style="${F}font-size:11px;letter-spacing:1px;color:#6f6f6f;padding-top:6px;">VALID UNTIL</div>`;
+    h += `<div style="${F}font-size:15px;font-weight:bold;">${ddmmyyyy(quote.valid_until)}</div>`;
+  }
   h += `</td></tr></table>`;
 
   // Customer — the part the standalone tool had no field for.
@@ -140,7 +144,8 @@ export function renderQuotationText(quote) {
 
   return [
     'BALAJI ENTERPRISES — QUOTATION',
-    `${quote.quote_number}${quote.version > 1 ? ` (rev ${quote.version})` : ''}   ${ddmmyyyy(quote.created_at)}`,
+    `${quote.quote_number}${quote.version > 1 ? ` (rev ${quote.version})` : ''}   ${ddmmyyyy(quote.quote_date || quote.created_at)}`,
+    quote.valid_until ? `Valid until ${ddmmyyyy(quote.valid_until)}` : '',
     quote.customer_name ? `To: ${quote.customer_name}` : '',
     '',
     ...lines,

@@ -1,4 +1,4 @@
-import { api, html, raw, card, money, rupees2, count, qty, shortDate, dateTime, esc, emptyState } from '../util.js';
+import { api, html, raw, card, money, rupees2, count, qty, shortDate, dateTime, esc, emptyState, todayISO, addDaysISO } from '../util.js';
 
 export const title = 'Quotations';
 
@@ -68,7 +68,10 @@ async function list(el) {
 async function composer(el, id) {
   el.innerHTML = '<div class="loading">Loading…</div>';
 
-  const [{ customers }, { defaultTerms }] = await Promise.all([api('/customers'), api('/quotations?limit=1')]);
+  const [{ customers }, { defaultTerms, validityDays }] = await Promise.all([
+    api('/customers'),
+    api('/quotations?limit=1'),
+  ]);
   let quote = id ? await api(`/quotations/${id}`) : null;
 
   const model = {
@@ -77,7 +80,10 @@ async function composer(el, id) {
     version: quote?.version ?? 1,
     status: quote?.status ?? 'draft',
     customerName: quote?.customer_name ?? '',
-    validUntil: quote?.valid_until ?? '',
+    // A new quotation is dated today and stands for the standard validity
+    // period, so neither field starts empty.
+    quoteDate: quote?.quote_date ?? todayISO(),
+    validUntil: quote?.valid_until ?? addDaysISO(todayISO(), validityDays),
     notes: quote?.notes ?? defaultTerms,
     lines: (quote?.lines ?? []).map((l) => ({
       itemName: l.item_name, itemCode: l.item_code, itemGuid: l.item_guid, brand: l.brand,
@@ -86,6 +92,13 @@ async function composer(el, id) {
     })),
     versions: quote?.versions ?? [],
   };
+
+  // Valid-until tracks the quotation date until someone sets it by hand. On a
+  // saved quote every valid_until is populated, so "by hand" has to mean it
+  // differs from what the standard validity period would have produced.
+  let validUntilPinned =
+    Boolean(quote?.valid_until) &&
+    quote.valid_until !== addDaysISO(quote.quote_date || todayISO(), validityDays);
 
   let credit = null;
   const loadCredit = async () => {
@@ -170,10 +183,17 @@ async function composer(el, id) {
                 ${customers.map((c) => `<option value="${esc(c.name)}"></option>`).join('')}
               </datalist>
             </div>
-            <div class="field" style="margin-bottom:0">
-              <label for="valid">Valid until</label>
-              <input type="date" id="valid" value="${esc(model.validUntil || '')}" ${readOnly() ? 'disabled' : ''} />
-            </div>`))}
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="field" style="margin-bottom:0">
+                <label for="quotedate">Date</label>
+                <input type="date" id="quotedate" value="${esc(model.quoteDate || '')}" ${readOnly() ? 'disabled' : ''} />
+              </div>
+              <div class="field" style="margin-bottom:0">
+                <label for="valid">Valid until</label>
+                <input type="date" id="valid" value="${esc(model.validUntil || '')}" ${readOnly() ? 'disabled' : ''} />
+              </div>
+            </div>
+            <div class="faint" id="validity-note" style="font-size:11.5px;margin-top:7px"></div>`))}
 
           <div style="height:14px"></div>
           <div id="creditcard"></div>
@@ -197,6 +217,24 @@ async function composer(el, id) {
     drawLines();
     drawActions();
     wire();
+    drawValidityNote();
+  }
+
+  /** Says in words how long the quote stands, and flags one already expired. */
+  function drawValidityNote() {
+    const note = el.querySelector('#validity-note');
+    if (!note) return;
+    if (!model.quoteDate || !model.validUntil) {
+      note.textContent = '';
+      return;
+    }
+    const days = Math.round(
+      (Date.parse(`${model.validUntil}T00:00:00`) - Date.parse(`${model.quoteDate}T00:00:00`)) / 86400000
+    );
+    const lapsed = model.validUntil < todayISO();
+    note.innerHTML = lapsed
+      ? `<span class="pill bad">Expired</span> validity ran out on ${shortDate(model.validUntil)}`
+      : `Stands for ${days} day${days === 1 ? '' : 's'}${validUntilPinned ? ' (set by hand)' : ''}.`;
   }
 
   function drawCredit() {
@@ -291,7 +329,21 @@ async function composer(el, id) {
       await loadCredit();
       drawCredit();
     });
-    el.querySelector('#valid')?.addEventListener('change', (e) => { model.validUntil = e.target.value; });
+    const validInput = el.querySelector('#valid');
+    el.querySelector('#quotedate')?.addEventListener('change', (e) => {
+      model.quoteDate = e.target.value;
+      // Re-date the expiry with it, unless it has been set deliberately.
+      if (!validUntilPinned && model.quoteDate) {
+        model.validUntil = addDaysISO(model.quoteDate, validityDays);
+        if (validInput) validInput.value = model.validUntil;
+      }
+      drawValidityNote();
+    });
+    validInput?.addEventListener('change', (e) => {
+      model.validUntil = e.target.value;
+      validUntilPinned = true;
+      drawValidityNote();
+    });
     el.querySelector('#notes')?.addEventListener('input', (e) => { model.notes = e.target.value; });
 
     // Recalculate on every keystroke. Deliberately does NOT redraw the row —
@@ -439,6 +491,7 @@ async function composer(el, id) {
       customerName: model.customerName,
       lines: model.lines,
       notes: model.notes,
+      quoteDate: model.quoteDate || null,
       validUntil: model.validUntil || null,
     });
 

@@ -42,6 +42,19 @@ export function money(n) {
 export const qty = (n) => new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(Number(n) || 0);
 export const count = (n) => inr.format(Number(n) || 0);
 
+// --- plain calendar dates (mirrors src/lib/dates.js) -----------------------
+// Local parts, never toISOString(): in IST that would report yesterday's date
+// for the whole of the working morning.
+export const toISODate = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+export const todayISO = () => toISODate(new Date());
+
+export function addDaysISO(iso, days) {
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+  return toISODate(new Date(y, m - 1, d + days));
+}
+
 export function shortDate(iso) {
   if (!iso) return '—';
   const d = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso);

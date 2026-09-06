@@ -22,6 +22,7 @@ function addColumn(table, column, declaration) {
   const has = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
   if (!has) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);
 }
+addColumn('quotations', 'quote_date', 'TEXT');
 addColumn('quotation_lines', 'brand', 'TEXT');
 addColumn('quotation_lines', 'hsn', 'TEXT');
 addColumn('quotation_lines', 'remarks', 'TEXT');

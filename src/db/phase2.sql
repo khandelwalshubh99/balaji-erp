@@ -58,6 +58,10 @@ CREATE TABLE IF NOT EXISTS quotations (
   customer_name TEXT NOT NULL,
   customer_guid TEXT,
   status        TEXT NOT NULL DEFAULT 'draft',  -- draft|sent|accepted|lost|superseded
+  -- The date the quotation is issued under, which is not the same thing as the
+  -- row's created_at: a quote can be dated deliberately, and a revision is
+  -- re-dated when it is issued.
+  quote_date    TEXT,
   sent_at       TEXT,
   valid_until   TEXT,
   lost_reason   TEXT,                       -- price|stock|delivery|no-response|other
