@@ -10,8 +10,26 @@
  * Tally machine's IP. This file is then never loaded.
  */
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
 import { XMLParser } from 'fast-xml-parser';
+import { config } from '../config.js';
 import { buildCompany, driftStock } from './mock-data.js';
+
+/**
+ * The stock the simulated company actually holds, written by the catalogue
+ * importer. A file, not a database read, because the fake Tally is standing in
+ * for a separate system and should not reach into the app's own store.
+ */
+function loadStockSeed() {
+  const seedPath = path.join(config.root, 'data', 'tally-seed.json');
+  try {
+    const seed = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+    return Array.isArray(seed.items) ? seed.items : null;
+  } catch {
+    return null; // no price list imported yet — fall back to invented products
+  }
+}
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', trimValues: true });
 
@@ -158,7 +176,8 @@ function parseTallyDate(s, endOfDay = false) {
 
 export function createMockTallyServer({ seed = 'balaji-2026', failureRate = 0, latencyMs = 100, company: companyName = 'Balaji Enterprises', log = () => {} } = {}) {
   const bootedAt = Date.now();
-  const company = buildCompany(seed);
+  const stockSeed = loadStockSeed();
+  const company = buildCompany(seed, new Date(), stockSeed);
   company.companyName = companyName;
 
   /** Vouchers pushed IN by the app (Phase 3 write-back lands here). */

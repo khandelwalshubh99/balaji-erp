@@ -12,6 +12,7 @@
 import { db } from '../db/index.js';
 import { config } from '../config.js';
 import { tally } from '../tally/client.js';
+import { matchCatalogue } from '../catalogue/match.js';
 
 const now = () => new Date().toISOString();
 
@@ -186,6 +187,23 @@ export async function runSync(trigger = 'manual') {
       const ms = Date.now() - d0;
       recordDataset.run(runId, key, 'failed', 0, ms, err.message);
       results.push({ dataset: key, label: writer.label, status: 'failed', records: 0, ms, error: err.message });
+    }
+  }
+
+  // Stock items may have been renamed or added in Tally, so re-match the
+  // catalogue against what just arrived. Cheap, and it keeps the quotation
+  // screen from showing a stock figure that belongs to a since-renamed item.
+  const stockOk = results.find((r) => r.dataset === 'stock')?.status === 'ok';
+  if (stockOk) {
+    const d0 = Date.now();
+    try {
+      const m = matchCatalogue();
+      recordDataset.run(runId, 'catalogue-match', 'ok', m.matched, Date.now() - d0,
+        `${m.matched} of ${m.catalogueItems} matched, ${m.unmatched} not stocked`);
+      results.push({ dataset: 'catalogue-match', label: 'Catalogue match', status: 'ok', records: m.matched, ms: Date.now() - d0 });
+    } catch (err) {
+      recordDataset.run(runId, 'catalogue-match', 'failed', 0, Date.now() - d0, err.message);
+      results.push({ dataset: 'catalogue-match', label: 'Catalogue match', status: 'failed', records: 0, ms: Date.now() - d0, error: err.message });
     }
   }
 

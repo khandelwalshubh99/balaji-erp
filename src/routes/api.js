@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import * as q from '../db/queries.js';
 import { runSync, syncStatus } from '../sync/engine.js';
 import { tally } from '../tally/client.js';
+import { searchCatalogue, catalogueFacets, matchSummary, unmatchedItems, orphanStockItems, matchCatalogue, lastRateFor } from '../catalogue/match.js';
 
 export const apiRouter = Router();
 
@@ -89,3 +90,30 @@ apiRouter.post('/sync/run', async (_req, res) => {
   const result = await runSync('manual');
   res.json(result);
 });
+
+// --- catalogue --------------------------------------------------------------
+apiRouter.get('/catalogue', (req, res) => {
+  const { search = '', brand = '', category = '', stocked = 'all' } = req.query;
+  res.json({
+    ...searchCatalogue({
+      search: String(search), brand: String(brand), category: String(category),
+      stocked: String(stocked), limit: Math.min(200, num(req.query.limit, 50)),
+    }),
+    ...catalogueFacets(),
+    summary: matchSummary(),
+  });
+});
+
+apiRouter.get('/catalogue/unmatched', (req, res) =>
+  res.json({
+    notStocked: unmatchedItems(num(req.query.limit, 100)),
+    notQuotable: orphanStockItems(num(req.query.limit, 100)),
+    summary: matchSummary(),
+  })
+);
+
+apiRouter.post('/catalogue/match', (_req, res) => res.json(matchCatalogue()));
+
+apiRouter.get('/catalogue/last-rate', (req, res) =>
+  res.json({ lastRate: lastRateFor(String(req.query.customer || ''), String(req.query.guid || '')) })
+);

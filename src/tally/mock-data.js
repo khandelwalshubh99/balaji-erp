@@ -217,16 +217,69 @@ function fyTag(date) {
   return `${String(y).slice(2)}${String(y + 1).slice(2)}`;
 }
 
-export function buildCompany(seedStr, now = new Date()) {
+/**
+ * Build stock items from the real price list when a seed is available.
+ *
+ * Tally item names never match a price list exactly, so this deliberately
+ * varies how each item is named and whether it carries a part number. That is
+ * the whole point: the catalogue-to-Tally matcher has to survive real name
+ * drift, and inventing tidy matching names would prove nothing.
+ */
+function stockFromSeed(seedItems, rand, between, intBetween) {
+  return seedItems.map((item, i) => {
+    const brand = String(item.brand || '').toUpperCase();
+    const desc = String(item.name || '').trim();
+    const code = String(item.code || '').trim();
+
+    const style = rand();
+    const name = (style < 0.7 ? `${brand} ${code} ${desc}` : style < 0.9 ? `${brand} ${desc}` : desc)
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 100);
+
+    const sell = Number(item.list_rate) || 0;
+    const cost = sell > 0 ? round2(sell / between(1.14, 1.38)) : 0;
+
+    // Hold roughly Rs 8k-70k of value per stocked line.
+    const nominal = cost > 0 ? Math.min(2500, Math.max(1, Math.round(between(8000, 70000) / cost))) : 0;
+
+    return {
+      guid: `sim-item-${i + 1}`,
+      name,
+      // Roughly how a real Tally master looks: most items carry the part
+      // number somewhere, a meaningful minority carry it nowhere and can only
+      // be found by name.
+      alias: rand() < 0.4 ? code : '',
+      partNumber: rand() < 0.8 ? code : '',
+      parent: item.category || 'General Hardware',
+      category: item.category || 'General Hardware',
+      brand,
+      baseUnits: item.units || 'Nos',
+      closingQty: rand() < 0.05 ? 0 : Math.round(nominal * between(0.3, 1.8)),
+      costRate: cost,
+      sellRate: sell,
+      reorderLevel: Math.max(2, Math.round(nominal * between(0.15, 0.4))),
+      gstRate: Number(item.gst_rate) || 18,
+      hsn: item.hsn || '',
+    };
+  });
+}
+
+export function buildCompany(seedStr, now = new Date(), stockSeed = null) {
   const rand = mulberry32(hashSeed(seedStr));
   const pick = (arr) => arr[Math.floor(rand() * arr.length)];
   const between = (lo, hi) => lo + rand() * (hi - lo);
   const intBetween = (lo, hi) => Math.floor(between(lo, hi + 1));
 
   // --- Stock items --------------------------------------------------------
+  // Real catalogue when one has been imported; invented products otherwise, so
+  // the app still runs on a fresh clone with no price list to hand.
   const stockItems = [];
+  if (stockSeed && stockSeed.length) {
+    stockItems.push(...stockFromSeed(stockSeed, rand, between, intBetween));
+  }
   let skuCounter = 1000;
-  for (const cat of CATALOGUE) {
+  for (const cat of stockItems.length ? [] : CATALOGUE) {
     for (const [family, variants, loPrice, hiPrice] of cat.families) {
       for (const brand of cat.brands) {
         for (const variant of variants) {

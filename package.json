@@ -2,22 +2,27 @@
   "name": "balaji-erp",
   "version": "0.1.0",
   "private": true,
-  "description": "Balaji Enterprises — custom Tally-connected operations system. Phase 0 + Phase 1.",
+  "description": "Balaji Enterprises \u2014 custom Tally-connected operations system. Phase 0 + Phase 1.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "tally:mock": "node scripts/run-mock-tally.js",
     "tally:probe": "node scripts/tally-probe.js",
     "sync:once": "node scripts/sync-once.js",
-    "db:reset": "node scripts/db-reset.js"
+    "db:reset": "node scripts/db-reset.js",
+    "catalogue:import": "node scripts/import-catalogue.js",
+    "catalogue:match": "node scripts/match-catalogue.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.5.0",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "express-session": "^1.18.1",
-    "fast-xml-parser": "^4.5.0"
+    "fast-xml-parser": "^4.5.0",
+    "xlsx": "^0.18.5"
   }
 }

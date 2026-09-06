@@ -3,6 +3,7 @@ import { api, ago, count, esc } from './util.js';
 const ROUTES = {
   overview: () => import('./views/overview.js'),
   stock: () => import('./views/stock.js'),
+  catalogue: () => import('./views/catalogue.js'),
   receivables: () => import('./views/receivables.js'),
   orders: () => import('./views/orders.js'),
   tally: () => import('./views/tally.js'),
