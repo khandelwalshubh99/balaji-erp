@@ -61,3 +61,55 @@ export function customerCredit(name, commitmentValue = 0) {
         : 'within',
   };
 }
+
+/**
+ * Match a customer name from outside the system to a Tally ledger.
+ *
+ * A purchase order arrives with whatever the customer calls themselves, which
+ * is rarely byte-identical to their ledger name — "Ashok Auto Works." against
+ * "Ashok Auto Works", "SANGHVI INDUSTRIES PVT. LTD." against "Sanghvi
+ * Industries Pvt Ltd". Nothing is matched on a guess: an unmatched name still
+ * produces an order, flagged, because a purchase order that quietly goes
+ * missing is far worse than one that needs a moment of attention.
+ */
+// Only true legal forms. "Industries", "Enterprises" and "Company" are part of
+// the actual name here — Sanghvi Industries and Sanghvi Motors are different
+// firms — and stripping them would match orders onto the wrong ledger, which
+// means the wrong credit position against the wrong customer.
+const LEGAL_SUFFIXES = /\b(pvt|private|ltd|limited|llp|inc|incorporated|corp)\b/gi;
+
+function normaliseCompany(name) {
+  return String(name || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]+/g, ' ')
+    .replace(LEGAL_SUFFIXES, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function matchCustomer(name) {
+  const given = String(name || '').trim();
+  if (!given) return { matched: false, name: '', guid: null, method: 'none' };
+
+  const ledgers = db
+    .prepare('SELECT guid, name FROM tally_ledgers WHERE is_customer = 1')
+    .all();
+
+  const exact = ledgers.find((l) => l.name.toLowerCase() === given.toLowerCase());
+  if (exact) return { matched: true, name: exact.name, guid: exact.guid, method: 'exact' };
+
+  const key = normaliseCompany(given);
+  if (key) {
+    const hits = ledgers.filter((l) => normaliseCompany(l.name) === key);
+    // Only a single candidate counts. Two ledgers that normalise the same way
+    // is a question for a person, not something to pick between.
+    if (hits.length === 1) {
+      return { matched: true, name: hits[0].name, guid: hits[0].guid, method: 'normalised' };
+    }
+    if (hits.length > 1) {
+      return { matched: false, name: given, guid: null, method: 'ambiguous', candidates: hits.map((h) => h.name) };
+    }
+  }
+
+  return { matched: false, name: given, guid: null, method: 'unmatched' };
+}

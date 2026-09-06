@@ -34,6 +34,13 @@ export const config = {
     onBoot: bool(process.env.SYNC_ON_BOOT, true),
   },
 
+  /**
+   * Shared secret for the purchase-order ingest endpoint. Unset means the
+   * endpoint is off — it fails closed, because an open endpoint that creates
+   * orders is worse than no endpoint.
+   */
+  ingestToken: process.env.INGEST_TOKEN || '',
+
   rules: {
     defaultReorderLevel: num(process.env.LOW_STOCK_DEFAULT_REORDER_LEVEL, 10),
     defaultCreditPeriodDays: num(process.env.DEFAULT_CREDIT_PERIOD_DAYS, 30),

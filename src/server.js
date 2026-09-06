@@ -5,6 +5,7 @@ import { config, isSimulated } from './config.js';
 import { seedUsers } from './db/index.js';
 import { authRouter } from './routes/auth.js';
 import { apiRouter } from './routes/api.js';
+import { ingestRouter } from './routes/ingest.js';
 import { requireAuth } from './middleware/auth.js';
 import { runSync, startScheduler } from './sync/engine.js';
 import { tally } from './tally/client.js';
@@ -26,6 +27,9 @@ app.use(
 const publicDir = path.join(config.root, 'public');
 
 app.use(authRouter);
+// Mounted before requireAuth: this one carries its own shared-secret check
+// because Apps Script cannot hold a session.
+app.use(ingestRouter);
 app.get('/login', (_req, res) => res.sendFile(path.join(publicDir, 'login.html')));
 app.use('/assets', express.static(path.join(publicDir, 'assets')));
 app.use('/css', express.static(path.join(publicDir, 'css')));

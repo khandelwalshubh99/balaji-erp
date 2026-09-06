@@ -135,6 +135,12 @@ left. Nobody has to remember to mark an order part-shipped, which is the whole
 point. An order that has shipped in part or full can no longer be edited or
 cancelled — adjust the dispatch instead.
 
+Purchase orders can also arrive **straight from Gmail**: the existing Apps
+Script scrape pushes each new PO in, and it lands in the **Items not entered**
+queue with its Drive link, ready for someone to key the items against the
+catalogue. Duplicates are caught on the source document, the PO number and the
+value. See [docs/gmail-po-ingest.md](docs/gmail-po-ingest.md).
+
 **Catalogue** — all 12,261 price-list SKUs with their Tally match state. See
 "The catalogue and the price list" below.
 

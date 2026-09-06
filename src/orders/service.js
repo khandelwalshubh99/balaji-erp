@@ -187,7 +187,10 @@ export function createOrder(input, actor) {
     source = 'manual', sourceRef = null, documentUrl = null, allowDuplicate = false,
   } = input;
   if (!customerName) throw new Error('A customer is required');
-  if (!lines.length) throw new Error('An order needs at least one line');
+  // A purchase order pulled in from email is a header and a document; its
+  // items only exist inside the attached PDF. Recording it with no lines and
+  // flagging it for entry beats dropping it, which is the alternative.
+  if (!lines.length && source === 'manual') throw new Error('An order needs at least one line');
 
   const t = totalsFor(asPricing(lines));
 
@@ -351,7 +354,14 @@ export function getOrder(id) {
 export function listOrders({ status = '', search = '', limit = 100 } = {}) {
   const where = [];
   const params = { limit };
-  if (status) { where.push('o.status = @status'); params.status = status; }
+  if (status === 'needs_lines') {
+    where.push(`o.status = 'open' AND NOT EXISTS (SELECT 1 FROM order_lines l WHERE l.order_id = o.id)`);
+  } else if (status === 'unmatched_customer') {
+    where.push('o.customer_guid IS NULL');
+  } else if (status) {
+    where.push('o.status = @status');
+    params.status = status;
+  }
   if (search) {
     where.push('(o.order_number LIKE @q OR o.customer_name LIKE @q OR o.customer_po_number LIKE @q)');
     params.q = `%${search}%`;
@@ -373,6 +383,13 @@ export function orderSummary() {
     openValue: by.open?.value || 0,
     flagged: db
       .prepare(`SELECT COUNT(*) AS n FROM orders WHERE status = 'open' AND credit_status != 'within'`)
+      .get().n,
+    needsLines: db
+      .prepare(`SELECT COUNT(*) AS n FROM orders o WHERE o.status = 'open'
+                AND NOT EXISTS (SELECT 1 FROM order_lines l WHERE l.order_id = o.id)`)
+      .get().n,
+    unmatchedCustomer: db
+      .prepare(`SELECT COUNT(*) AS n FROM orders WHERE customer_guid IS NULL AND status != 'cancelled'`)
       .get().n,
   };
 }

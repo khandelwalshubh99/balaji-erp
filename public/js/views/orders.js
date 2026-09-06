@@ -47,8 +47,18 @@ async function list(el) {
         tone: summary.flagged ? 'warn' : '',
         sub: 'open orders, over limit or overdue',
       }))}
-      ${raw(kpi({ label: 'Part dispatched', value: count(summary.byStatus.part_dispatched?.n || 0), sub: 'shipped in part' }))}
-      ${raw(kpi({ label: 'Dispatched', value: count(summary.byStatus.dispatched?.n || 0), sub: 'fully shipped' }))}
+      ${raw(kpi({
+        label: 'Items not entered',
+        value: count(summary.needsLines),
+        tone: summary.needsLines ? 'warn' : '',
+        sub: 'POs in from email, awaiting entry',
+      }))}
+      ${raw(kpi({
+        label: 'Customer unmatched',
+        value: count(summary.unmatchedCustomer),
+        tone: summary.unmatchedCustomer ? 'bad' : '',
+        sub: 'not tied to a Tally ledger',
+      }))}
     </div>
 
     <div class="toolbar">
@@ -57,6 +67,8 @@ async function list(el) {
       <select id="status">
         <option value="">Any status</option>
         <option value="open">Awaiting dispatch</option>
+        <option value="needs_lines">Items not entered</option>
+        <option value="unmatched_customer">Customer unmatched</option>
         <option value="part_dispatched">Part dispatched</option>
         <option value="dispatched">Dispatched</option>
         <option value="cancelled">Cancelled</option>
@@ -81,10 +93,12 @@ async function list(el) {
                 <td class="mono faint nowrap">${esc(o.customer_po_number || '—')}</td>
                 <td class="truncate">${esc(o.customer_name)}</td>
                 <td class="dim nowrap">${shortDate(o.received_at)}</td>
-                <td class="num dim">${o.line_count}</td>
+                <td class="num ${o.line_count ? 'dim' : 'warn'}">${o.line_count || '—'}</td>
                 <td class="num">${money(o.total)}</td>
                 <td><span class="pill ${CREDIT_TONE[o.credit_status] || ''}">${CREDIT_LABEL[o.credit_status] || o.credit_status}</span></td>
-                <td><span class="pill ${STATUS_TONE[o.status] || ''}">${STATUS_LABEL[o.status] || o.status}</span></td>
+                <td><span class="pill ${STATUS_TONE[o.status] || ''}">${STATUS_LABEL[o.status] || o.status}</span>${
+                  o.status === 'open' && !o.line_count ? ' <span class="pill warn">needs items</span>' : ''
+                }${o.source !== 'manual' ? ` <span class="pill">${esc(o.source)}</span>` : ''}</td>
               </tr>`)
               .join('')}</tbody></table></div>`
         : emptyState('No orders recorded yet. “Record an order” starts one, or accept a quotation and convert it.'),
@@ -150,94 +164,324 @@ const linesTable = (lines, { editable, showDispatched = false }) => `
   </table></div>`;
 
 // ---------------------------------------------------------------------------
-// Detail (a recorded order)
+// Detail — read-only once shipped, editable while still open
 // ---------------------------------------------------------------------------
 async function detail(el, id) {
   el.innerHTML = '<div class="loading">Loading order…</div>';
   const o = await api(`/orders/${id}`);
   const editable = o.status === 'open';
 
-  el.innerHTML = html`
-    <div class="toolbar">
-      <button class="btn small" id="back">← All orders</button>
-      <span class="pill mono">${o.order_number}</span>
-      <span class="pill ${raw(STATUS_TONE[o.status] || '')}">${STATUS_LABEL[o.status] || o.status}</span>
-      ${raw(o.quotation ? `<span class="pill">from ${esc(o.quotation.quote_number)}</span>` : '')}
-      <span style="flex:1"></span>
-      ${raw(editable ? '<button class="btn small" id="cancel">Cancel order</button>' : '')}
-    </div>
+  // Lines are held in a model so they can be edited in place. An order pulled
+  // in from email arrives with none — its items are inside the PDF, and this
+  // is where someone keys them in with the document open beside them.
+  const model = {
+    customerPoNumber: o.customer_po_number || '',
+    poDate: o.po_date || '',
+    paymentTermsDays: o.payment_terms_days ?? 0,
+    notes: o.notes || '',
+    lines: o.lines.map((l) => ({
+      itemName: l.item_name, itemCode: l.item_code, itemGuid: l.item_guid,
+      brand: l.brand, hsn: l.hsn, qty: l.qty_ordered, units: l.units,
+      rate: l.rate, gstRate: l.gst_rate,
+      qtyDispatched: l.qty_dispatched,
+    })),
+  };
+  let dirty = false;
 
-    ${raw(o.status === 'cancelled'
-      ? `<div class="callout warn" style="margin-bottom:14px"><strong>Cancelled.</strong> ${esc(o.cancelled_reason || 'No reason recorded.')}</div>`
-      : '')}
+  const n = (v) => Number(v) || 0;
+  const taxableOf = (l) => n(l.qty) * n(l.rate);
+  const totals = () =>
+    model.lines.reduce((a, l) => {
+      const t = taxableOf(l);
+      a.subtotal += t;
+      a.tax += (t * n(l.gstRate)) / 100;
+      return a;
+    }, { subtotal: 0, tax: 0 });
 
-    <div class="quote-grid">
-      <div>
-        ${raw(card('Ordered', linesTable(o.lines, { editable: false, showDispatched: true }), {
-          note: `${o.lines.length} line${o.lines.length === 1 ? '' : 's'}`,
-        }))}
+  function draw() {
+    const t = totals();
+    const needsLines = editable && model.lines.length === 0;
 
-        <div style="height:14px"></div>
-
-        ${raw(card('History',
-          o.events.length
-            ? `<div class="totals">${o.events.map((e) => `<div class="row">
-                 <span class="dim">${esc(e.note || e.to_stage)}</span>
-                 <span class="faint">${esc(e.actor_name || 'system')} · ${dateTime(e.at)}</span>
-               </div>`).join('')}</div>`
-            : emptyState('Nothing recorded yet.')
-        ))}
+    el.innerHTML = html`
+      <div class="toolbar">
+        <button class="btn small" id="back">← All orders</button>
+        <span class="pill mono">${o.order_number}</span>
+        <span class="pill ${raw(STATUS_TONE[o.status] || '')}">${STATUS_LABEL[o.status] || o.status}</span>
+        ${raw(o.quotation ? `<span class="pill">from ${esc(o.quotation.quote_number)}</span>` : '')}
+        ${raw(o.source !== 'manual' ? `<span class="pill">via ${esc(o.source)}</span>` : '')}
+        ${raw(!o.customer_guid && o.status !== 'cancelled'
+          ? '<span class="pill bad">Customer not in Tally</span>' : '')}
+        <span style="flex:1"></span>
+        <span id="savestate" class="faint" style="font-size:12px"></span>
+        ${raw(editable ? '<button class="btn primary small" id="save">Save</button>' : '')}
+        ${raw(editable ? '<button class="btn small" id="cancel">Cancel order</button>' : '')}
       </div>
 
-      <div>
-        ${raw(card('Order', `
-          <div class="credit-panel">
-            <div class="row"><span class="dim">Customer</span><span>${esc(o.customer_name)}</span></div>
-            <div class="row"><span class="dim">Their PO</span><span class="mono">${esc(o.customer_po_number || '—')}</span></div>
-            <div class="row"><span class="dim">PO date</span><span>${shortDate(o.po_date)}</span></div>
-            <div class="row"><span class="dim">Received</span><span>${shortDate(o.received_at)}</span></div>
-            <div class="row"><span class="dim">Payment terms</span><span>${o.payment_terms_days} days</span></div>
+      ${raw(o.status === 'cancelled'
+        ? `<div class="callout warn" style="margin-bottom:14px"><strong>Cancelled.</strong> ${esc(o.cancelled_reason || 'No reason recorded.')}</div>`
+        : '')}
+
+      ${raw(needsLines
+        ? `<div class="callout warn" style="margin-bottom:14px">
+             <strong>Items not entered yet.</strong> This purchase order came in as a header and a document — its
+             items are inside the PDF. ${o.document_url
+               ? `<a href="${esc(o.document_url)}" target="_blank" rel="noopener noreferrer">Open the purchase order</a> and key them in below.`
+               : 'Add them below.'}
+           </div>`
+        : '')}
+
+      <div class="quote-grid">
+        <div>
+          ${raw(card('Ordered',
+            `${editable ? `<div class="searchbox" style="margin-bottom:12px">
+                <input type="search" id="itemsearch" placeholder="Search 12,000+ SKUs to add a line…" autocomplete="off" />
+                <div id="results"></div>
+              </div>` : ''}
+             ${linesTable(model.lines, { editable, showDispatched: !editable })}`,
+            { note: `${model.lines.length} line${model.lines.length === 1 ? '' : 's'}` }))}
+
+          <div style="height:14px"></div>
+
+          ${raw(card('History',
+            o.events.length
+              ? `<div class="totals">${o.events.map((e) => `<div class="row">
+                   <span class="dim">${esc(e.note || e.to_stage)}</span>
+                   <span class="faint">${esc(e.actor_name || 'system')} · ${dateTime(e.at)}</span>
+                 </div>`).join('')}</div>`
+              : emptyState('Nothing recorded yet.')
+          ))}
+        </div>
+
+        <div>
+          ${raw(card('Purchase order', editable
+            ? `<div class="field">
+                 <label for="po">Their PO number</label>
+                 <input id="po" value="${esc(model.customerPoNumber)}" placeholder="As printed on their purchase order" />
+               </div>
+               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                 <div class="field" style="margin-bottom:0">
+                   <label for="podate">PO date</label>
+                   <input type="date" id="podate" value="${esc(model.poDate)}" />
+                 </div>
+                 <div class="field" style="margin-bottom:0">
+                   <label for="terms">Payment terms</label>
+                   <input id="terms" value="${model.paymentTermsDays}" placeholder="days" />
+                 </div>
+               </div>
+               <div class="credit-panel" style="margin-top:12px">
+                 <div class="row"><span class="dim">Customer</span><span>${esc(o.customer_name)}</span></div>
+                 <div class="row"><span class="dim">Received</span><span>${shortDate(o.received_at)}</span></div>
+               </div>
+               ${o.document_url ? `<div style="margin-top:10px"><a href="${esc(o.document_url)}" target="_blank" rel="noopener noreferrer">Open the original purchase order ↗</a></div>` : ''}`
+            : `<div class="credit-panel">
+                 <div class="row"><span class="dim">Customer</span><span>${esc(o.customer_name)}</span></div>
+                 <div class="row"><span class="dim">Their PO</span><span class="mono">${esc(o.customer_po_number || '—')}</span></div>
+                 <div class="row"><span class="dim">PO date</span><span>${shortDate(o.po_date)}</span></div>
+                 <div class="row"><span class="dim">Received</span><span>${shortDate(o.received_at)}</span></div>
+                 <div class="row"><span class="dim">Payment terms</span><span>${o.payment_terms_days} days</span></div>
+               </div>
+               ${o.document_url ? `<div style="margin-top:10px"><a href="${esc(o.document_url)}" target="_blank" rel="noopener noreferrer">Open the original purchase order ↗</a></div>` : ''}`))}
+
+          <div style="height:14px"></div>
+          ${raw(creditCard(o.creditNow, t.subtotal + t.tax, { snapshot: o }))}
+          <div style="height:14px"></div>
+
+          ${raw(card('Totals', `<div class="totals">
+            <div class="row"><span class="dim">Subtotal</span><span id="t-subtotal">${rupees2(t.subtotal)}</span></div>
+            <div class="row"><span class="dim">GST</span><span id="t-gst">${rupees2(t.tax)}</span></div>
+            <div class="row grand"><span>Total</span><span id="t-total">${rupees2(t.subtotal + t.tax)}</span></div>
           </div>`))}
 
-        <div style="height:14px"></div>
-        ${raw(creditCard(o.creditNow, o.total, { snapshot: o }))}
-        <div style="height:14px"></div>
-
-        ${raw(card('Totals', `<div class="totals">
-          <div class="row"><span class="dim">Subtotal</span><span>${rupees2(o.subtotal)}</span></div>
-          <div class="row"><span class="dim">GST</span><span>${rupees2(o.tax_amount)}</span></div>
-          <div class="row grand"><span>Total</span><span>${rupees2(o.total)}</span></div>
-        </div>`))}
+          ${raw(editable ? `<div style="height:14px"></div>${card('Notes',
+            `<textarea id="notes" placeholder="Anything worth the next person knowing.">${esc(model.notes)}</textarea>`)}` : '')}
+        </div>
       </div>
-    </div>
-  `;
+    `;
+    drawLines();
+    wire();
+    markDirty(dirty);
+  }
 
-  el.querySelector('#lines').innerHTML = o.lines
-    .map((l, i) => `<tr>
-      <td class="faint">${i + 1}</td>
-      <td><div class="truncate" title="${esc(l.item_name)}">${esc(l.item_name)}</div>
-          <div class="faint mono" style="font-size:11px">${esc(l.item_code || '')}${esc(l.brand ? ` · ${l.brand}` : '')}</div></td>
-      <td class="num">${qty(l.qty_ordered)}</td>
-      <td class="dim">${esc(l.units || '')}</td>
-      <td class="num">${rupees2(l.rate)}</td>
-      <td class="num dim">${l.gst_rate}</td>
-      <td class="num">${rupees2(l.amount)}</td>
-      <td class="num ${l.qty_dispatched >= l.qty_ordered ? 'ok' : l.qty_dispatched > 0 ? 'warn' : 'faint'}">
-        ${qty(l.qty_dispatched)}${l.qty_pending > 0 ? ` <span class="faint">/ ${qty(l.qty_ordered)}</span>` : ''}
-      </td>
-    </tr>`)
-    .join('');
-
-  el.querySelector('#back').addEventListener('click', () => { location.hash = '#/orders'; });
-  el.querySelector('#cancel')?.addEventListener('click', async () => {
-    const reason = prompt('Why is this order being cancelled?');
-    if (reason === null) return;
-    try {
-      await api(`/orders/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) });
-      render(el);
-    } catch (err) {
-      alert(err.message);
+  function drawLines() {
+    const body = el.querySelector('#lines');
+    if (!model.lines.length) {
+      body.innerHTML = `<tr><td colspan="9" class="empty">No items on this order yet.</td></tr>`;
+      return;
     }
+    body.innerHTML = model.lines
+      .map((l, i) => `<tr>
+        <td class="faint">${i + 1}</td>
+        <td><div class="truncate" title="${esc(l.itemName)}">${esc(l.itemName)}</div>
+            <div class="faint mono" style="font-size:11px">${esc(l.itemCode || '')}${esc(l.brand ? ` · ${l.brand}` : '')}</div></td>
+        ${editable
+          ? `<td><input data-i="${i}" data-k="qty" value="${l.qty}" /></td>
+             <td><input class="text" data-i="${i}" data-k="units" value="${esc(l.units || '')}" /></td>
+             <td><input data-i="${i}" data-k="rate" value="${l.rate}" /></td>
+             <td><input data-i="${i}" data-k="gstRate" value="${l.gstRate || 0}" /></td>`
+          : `<td class="num">${qty(l.qty)}</td><td class="dim">${esc(l.units || '')}</td>
+             <td class="num">${rupees2(l.rate)}</td><td class="num dim">${l.gstRate}</td>`}
+        <td class="num" data-amount="${i}">${rupees2(taxableOf(l))}</td>
+        ${editable
+          ? `<td><button class="del" data-del="${i}" title="Remove">×</button></td>`
+          : `<td class="num ${l.qtyDispatched >= l.qty ? 'ok' : l.qtyDispatched > 0 ? 'warn' : 'faint'}">${qty(l.qtyDispatched)} <span class="faint">/ ${qty(l.qty)}</span></td>`}
+      </tr>`)
+      .join('');
+  }
+
+  function markDirty(state) {
+    dirty = state;
+    const node = el.querySelector('#savestate');
+    if (node) node.textContent = state ? 'Unsaved changes' : '';
+  }
+
+  function recalc(i) {
+    if (i !== undefined) {
+      const cell = el.querySelector(`[data-amount="${i}"]`);
+      if (cell) cell.textContent = rupees2(taxableOf(model.lines[i]));
+    }
+    const t = totals();
+    const set = (sel, v) => { const node = el.querySelector(sel); if (node) node.textContent = rupees2(v); };
+    set('#t-subtotal', t.subtotal);
+    set('#t-gst', t.tax);
+    set('#t-total', t.subtotal + t.tax);
+
+    const credit = o.creditNow;
+    if (credit) {
+      const after = credit.outstanding + t.subtotal + t.tax;
+      const over = credit.creditLimit > 0 && after > credit.creditLimit;
+      const value = el.querySelector('#c-after');
+      if (value) { value.textContent = money(after); value.className = over ? 'bad' : ''; }
+      const flag = el.querySelector('#c-after-flag');
+      if (flag) {
+        flag.innerHTML = over
+          ? `<span class="pill bad">Takes them ${money(after - credit.creditLimit)} past their limit</span>`
+          : '';
+      }
+    }
+    markDirty(true);
+  }
+
+  function wire() {
+    el.querySelector('#back').addEventListener('click', () => {
+      if (dirty && !confirm('Leave without saving?')) return;
+      location.hash = '#/orders';
+    });
+
+    if (!editable) return;
+
+    el.querySelector('#po')?.addEventListener('input', (e) => { model.customerPoNumber = e.target.value; markDirty(true); });
+    el.querySelector('#podate')?.addEventListener('change', (e) => { model.poDate = e.target.value; markDirty(true); });
+    el.querySelector('#terms')?.addEventListener('input', (e) => { model.paymentTermsDays = Number(e.target.value) || 0; markDirty(true); });
+    el.querySelector('#notes')?.addEventListener('input', (e) => { model.notes = e.target.value; markDirty(true); });
+
+    el.querySelectorAll('.lines input[data-k]').forEach((input) => {
+      const apply = () => {
+        const i = Number(input.dataset.i);
+        const k = input.dataset.k;
+        model.lines[i][k] = k === 'units' ? input.value : Number(input.value) || 0;
+        recalc(i);
+      };
+      input.addEventListener('input', apply);
+      input.addEventListener('change', apply);
+    });
+    el.querySelectorAll('[data-del]').forEach((btn) =>
+      btn.addEventListener('click', () => { model.lines.splice(Number(btn.dataset.del), 1); dirty = true; draw(); })
+    );
+
+    attachItemSearch(el, o.customer_name, (line) => {
+      model.lines.push(line);
+      dirty = true;
+      draw();
+      el.querySelector('#itemsearch')?.focus();
+    });
+
+    el.querySelector('#save').addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      try {
+        await api(`/orders/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            customerPoNumber: model.customerPoNumber || null,
+            poDate: model.poDate || null,
+            paymentTermsDays: model.paymentTermsDays,
+            notes: model.notes || null,
+            lines: model.lines,
+          }),
+        });
+        dirty = false;
+        render(el);
+      } catch (err) {
+        alert(err.message);
+        e.target.disabled = false;
+      }
+    });
+
+    el.querySelector('#cancel')?.addEventListener('click', async () => {
+      const reason = prompt('Why is this order being cancelled?');
+      if (reason === null) return;
+      try {
+        await api(`/orders/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) });
+        dirty = false;
+        render(el);
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+  }
+
+  draw();
+}
+
+/**
+ * The catalogue picker, shared by the composer and the detail editor.
+ * Calls back with a ready-made order line.
+ */
+function attachItemSearch(el, customerName, onPick) {
+  const input = el.querySelector('#itemsearch');
+  const results = el.querySelector('#results');
+  if (!input || !results) return;
+  let timer;
+  let current = [];
+  const close = () => { results.innerHTML = ''; };
+
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const term = input.value.trim();
+    if (term.length < 2) return close();
+    timer = setTimeout(async () => {
+      const p = new URLSearchParams({ search: term, limit: '12' });
+      if (customerName) p.set('customer', customerName);
+      const { rows } = await api(`/catalogue?${p}`);
+      current = rows;
+      results.innerHTML = rows.length
+        ? `<div class="results">${rows.map((r, i) => {
+            const stock = r.match_method === 'unmatched'
+              ? '<span class="pill">not stocked</span>'
+              : `<span class="${r.closing_qty > 0 ? 'dim' : 'bad'}">${qty(r.closing_qty)} ${esc(r.base_units || '')} in stock</span>`;
+            const last = r.last_rate ? `<div class="last">last ${rupees2(r.last_rate)} · ${shortDate(r.last_rate_date)}</div>` : '';
+            return `<div class="result" data-i="${i}">
+              <div><div class="title">${esc(r.name)}</div>
+                <div class="meta"><span class="mono">${esc(r.code)}</span><span>${esc(r.brand)}</span>${stock}</div></div>
+              <div class="rates"><div class="list">${rupees2(r.list_rate)}</div>${last}</div>
+            </div>`;
+          }).join('')}</div>`
+        : `<div class="results"><div class="empty">Nothing matches “${esc(term)}”.</div></div>`;
+
+      results.querySelectorAll('.result').forEach((node) =>
+        node.addEventListener('click', () => {
+          const r = current[Number(node.dataset.i)];
+          input.value = '';
+          close();
+          onPick({
+            itemName: r.name, itemCode: r.code, itemGuid: r.tally_guid, brand: r.brand, hsn: r.hsn,
+            qty: 1, units: r.units || 'Nos', rate: r.last_rate ?? r.list_rate, gstRate: r.gst_rate ?? 18,
+          });
+        })
+      );
+    }, 180);
+  });
+  document.addEventListener('click', (e) => {
+    if (!results.contains(e.target) && e.target !== input) close();
   });
 }
 
@@ -444,52 +688,10 @@ async function composer(el, _id, quotationId) {
   }
 
   function wireSearch() {
-    const input = el.querySelector('#itemsearch');
-    const results = el.querySelector('#results');
-    let timer;
-    let current = [];
-    const close = () => { results.innerHTML = ''; };
-
-    input.addEventListener('input', () => {
-      clearTimeout(timer);
-      const term = input.value.trim();
-      if (term.length < 2) return close();
-      timer = setTimeout(async () => {
-        const p = new URLSearchParams({ search: term, limit: '12' });
-        if (model.customerName) p.set('customer', model.customerName);
-        const { rows } = await api(`/catalogue?${p}`);
-        current = rows;
-        results.innerHTML = rows.length
-          ? `<div class="results">${rows.map((r, i) => {
-              const stock = r.match_method === 'unmatched'
-                ? '<span class="pill">not stocked</span>'
-                : `<span class="${r.closing_qty > 0 ? 'dim' : 'bad'}">${qty(r.closing_qty)} ${esc(r.base_units || '')} in stock</span>`;
-              const last = r.last_rate ? `<div class="last">last ${rupees2(r.last_rate)} · ${shortDate(r.last_rate_date)}</div>` : '';
-              return `<div class="result" data-i="${i}">
-                <div><div class="title">${esc(r.name)}</div>
-                  <div class="meta"><span class="mono">${esc(r.code)}</span><span>${esc(r.brand)}</span>${stock}</div></div>
-                <div class="rates"><div class="list">${rupees2(r.list_rate)}</div>${last}</div>
-              </div>`;
-            }).join('')}</div>`
-          : `<div class="results"><div class="empty">Nothing matches “${esc(term)}”.</div></div>`;
-
-        results.querySelectorAll('.result').forEach((node) =>
-          node.addEventListener('click', () => {
-            const r = current[Number(node.dataset.i)];
-            model.lines.push({
-              itemName: r.name, itemCode: r.code, itemGuid: r.tally_guid, brand: r.brand, hsn: r.hsn,
-              qty: 1, units: r.units || 'Nos', rate: r.last_rate ?? r.list_rate, gstRate: r.gst_rate ?? 18,
-            });
-            input.value = '';
-            close();
-            draw();
-            el.querySelector('#itemsearch')?.focus();
-          })
-        );
-      }, 180);
-    });
-    document.addEventListener('click', (e) => {
-      if (!results.contains(e.target) && e.target !== input) close();
+    attachItemSearch(el, model.customerName, (line) => {
+      model.lines.push(line);
+      draw();
+      el.querySelector('#itemsearch')?.focus();
     });
   }
 
