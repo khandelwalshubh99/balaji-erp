@@ -93,12 +93,9 @@ async function composer(el, id) {
     versions: quote?.versions ?? [],
   };
 
-  // Valid-until tracks the quotation date until someone sets it by hand. On a
-  // saved quote every valid_until is populated, so "by hand" has to mean it
-  // differs from what the standard validity period would have produced.
-  let validUntilPinned =
-    Boolean(quote?.valid_until) &&
-    quote.valid_until !== addDaysISO(quote.quote_date || todayISO(), validityDays);
+  // Valid-until tracks the quotation date until someone sets it by hand. The
+  // server decides and stores that; this only mirrors it.
+  let validUntilPinned = Boolean(quote?.valid_until_pinned);
 
   let credit = null;
   const loadCredit = async () => {

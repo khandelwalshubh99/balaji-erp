@@ -17,10 +17,27 @@ const nowIso = () => new Date().toISOString();
  */
 export const QUOTE_VALIDITY_DAYS = 15;
 
-/** Today, unless a date was given; valid-until follows the quotation date. */
-function datesFor({ quoteDate, validUntil } = {}) {
-  const date = quoteDate || todayISO();
-  return { quoteDate: date, validUntil: validUntil || addDaysISO(date, QUOTE_VALIDITY_DAYS) };
+/**
+ * Resolve a quotation's two dates.
+ *
+ * Valid-until always follows the quotation date, unless someone has set it
+ * deliberately for this quotation. That rule lives here rather than in the
+ * browser so it holds however the record is changed — a client that sends only
+ * a new date still gets a correctly re-derived expiry.
+ */
+function datesFor({ quoteDate, validUntil } = {}, existing = null) {
+  const date = quoteDate || existing?.quote_date || todayISO();
+  const derived = addDaysISO(date, QUOTE_VALIDITY_DAYS);
+
+  if (validUntil) {
+    // Supplying an expiry that is not the derived one is what pins it.
+    return { quoteDate: date, validUntil, pinned: validUntil !== derived ? 1 : 0 };
+  }
+  // Nothing supplied: keep a pinned expiry, otherwise track the date.
+  if (existing?.valid_until_pinned && existing.valid_until) {
+    return { quoteDate: date, validUntil: existing.valid_until, pinned: 1 };
+  }
+  return { quoteDate: date, validUntil: derived, pinned: 0 };
 }
 
 /** Financial-year tag, Tally style: April 2026 -> "2627". */
@@ -112,10 +129,10 @@ export function createQuotation({ customerName, customerGuid, rfqId, lines = [],
   const info = db
     .prepare(`
       INSERT INTO quotations (quote_number, version, is_current, rfq_id, customer_name, customer_guid,
-        status, quote_date, valid_until, subtotal, tax_amount, total, notes)
-      VALUES (?, 1, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`)
+        status, quote_date, valid_until, valid_until_pinned, subtotal, tax_amount, total, notes)
+      VALUES (?, 1, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)`)
     .run(quoteNumber, rfqId || null, customerName, customerGuid || null, d.quoteDate, d.validUntil,
-      t.subtotal, t.taxAmount, t.total, notes ?? terms ?? null);
+      d.pinned, t.subtotal, t.taxAmount, t.total, notes ?? terms ?? null);
   const id = info.lastInsertRowid;
   writeLines(id, lines);
   logEvent('quotation', id, 'draft', actor, `${quoteNumber} created`);
@@ -133,14 +150,15 @@ export function updateQuotation(id, { customerName, customerGuid, lines, notes, 
   }
   const nextLines = lines ?? getLines(id);
   const t = totalsFor(nextLines);
+  const d = datesFor({ quoteDate, validUntil }, existing);
   db.prepare(`
     UPDATE quotations SET customer_name = COALESCE(?, customer_name),
       customer_guid = COALESCE(?, customer_guid), notes = COALESCE(?, notes),
-      quote_date = COALESCE(?, quote_date), valid_until = COALESCE(?, valid_until),
+      quote_date = ?, valid_until = ?, valid_until_pinned = ?,
       subtotal = ?, tax_amount = ?, total = ?, updated_at = datetime('now')
     WHERE id = ?`)
     .run(customerName ?? null, customerGuid ?? null, notes ?? null,
-      quoteDate ?? null, validUntil ?? null, t.subtotal, t.taxAmount, t.total, id);
+      d.quoteDate, d.validUntil, d.pinned, t.subtotal, t.taxAmount, t.total, id);
   if (lines) writeLines(id, lines);
   return getQuotation(id);
 }
@@ -158,8 +176,8 @@ export function reviseQuotation(id, actor) {
     const d = datesFor({});
     const info = db.prepare(`
       INSERT INTO quotations (quote_number, version, is_current, rfq_id, customer_name, customer_guid,
-        status, quote_date, valid_until, subtotal, tax_amount, total, notes)
-      VALUES (?, ?, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`)
+        status, quote_date, valid_until, valid_until_pinned, subtotal, tax_amount, total, notes)
+      VALUES (?, ?, 1, ?, ?, ?, 'draft', ?, ?, 0, ?, ?, ?, ?)`)
       .run(current.quote_number, current.version + 1, current.rfq_id, current.customer_name,
         current.customer_guid, d.quoteDate, d.validUntil, current.subtotal, current.tax_amount,
         current.total, current.notes);

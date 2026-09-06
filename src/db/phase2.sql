@@ -64,6 +64,10 @@ CREATE TABLE IF NOT EXISTS quotations (
   quote_date    TEXT,
   sent_at       TEXT,
   valid_until   TEXT,
+  -- Whether someone set the expiry deliberately. Stored rather than inferred:
+  -- a hand-set date that happens to land on the default is still a decision,
+  -- and re-deriving it from the value alone cannot tell the difference.
+  valid_until_pinned INTEGER NOT NULL DEFAULT 0,
   lost_reason   TEXT,                       -- price|stock|delivery|no-response|other
   subtotal      REAL DEFAULT 0,
   tax_amount    REAL DEFAULT 0,
