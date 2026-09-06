@@ -17,6 +17,15 @@ for (const file of ['schema.sql', 'phase2.sql']) {
   db.exec(fs.readFileSync(path.join(config.root, 'src', 'db', file), 'utf8'));
 }
 
+/** Columns added after a table already existed in someone's database. */
+function addColumn(table, column, declaration) {
+  const has = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+  if (!has) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);
+}
+addColumn('quotation_lines', 'brand', 'TEXT');
+addColumn('quotation_lines', 'hsn', 'TEXT');
+addColumn('quotation_lines', 'remarks', 'TEXT');
+
 /**
  * Seed the two owner accounts described in Phase 1 ("likely just you and your
  * father, since it contains receivables"). The other three roles exist in the

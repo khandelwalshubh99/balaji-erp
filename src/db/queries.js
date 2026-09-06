@@ -71,7 +71,10 @@ export function stockItems({ search = '', category = '', status = 'all', sort = 
     where.push('category = @category');
     params.category = category;
   }
-  const level = `MAX(reorder_level, ${Number(config.rules.defaultReorderLevel)})`;
+  // An item's own reorder level wins. The configured figure is only a
+  // fallback for items where nobody has set one in Tally -- MAX() would
+  // override every deliberately-low level and flag half the shelf.
+  const level = `CASE WHEN reorder_level > 0 THEN reorder_level ELSE ${Number(config.rules.defaultReorderLevel)} END`;
   if (status === 'out') where.push('closing_qty <= 0');
   else if (status === 'low') where.push(`closing_qty > 0 AND closing_qty <= ${level}`);
   else if (status === 'ok') where.push(`closing_qty > ${level}`);
@@ -97,7 +100,10 @@ export function stockItems({ search = '', category = '', status = 'all', sort = 
 }
 
 export function stockSummary() {
-  const level = `MAX(reorder_level, ${Number(config.rules.defaultReorderLevel)})`;
+  // An item's own reorder level wins. The configured figure is only a
+  // fallback for items where nobody has set one in Tally -- MAX() would
+  // override every deliberately-low level and flag half the shelf.
+  const level = `CASE WHEN reorder_level > 0 THEN reorder_level ELSE ${Number(config.rules.defaultReorderLevel)} END`;
   return db
     .prepare(
       `SELECT COUNT(*) AS items,
@@ -258,7 +264,10 @@ export function topCustomers({ days = 90, limit = 8 } = {}) {
 }
 
 export function reorderList(limit = 25) {
-  const level = `MAX(reorder_level, ${Number(config.rules.defaultReorderLevel)})`;
+  // An item's own reorder level wins. The configured figure is only a
+  // fallback for items where nobody has set one in Tally -- MAX() would
+  // override every deliberately-low level and flag half the shelf.
+  const level = `CASE WHEN reorder_level > 0 THEN reorder_level ELSE ${Number(config.rules.defaultReorderLevel)} END`;
   return db
     .prepare(
       `SELECT name, category, base_units, closing_qty, reorder_level, standard_price,

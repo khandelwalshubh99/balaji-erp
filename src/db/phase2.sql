@@ -86,7 +86,12 @@ CREATE TABLE IF NOT EXISTS quotation_lines (
   discount_pct  REAL DEFAULT 0,
   rate          REAL NOT NULL DEFAULT 0,    -- rate actually quoted
   gst_rate      REAL DEFAULT 0,
-  amount        REAL NOT NULL DEFAULT 0
+  amount        REAL NOT NULL DEFAULT 0,
+  -- Snapshotted, not joined. A quotation is a record of what was sent; if the
+  -- price list is re-imported next month the quote must still read the same.
+  brand         TEXT,
+  hsn           TEXT,
+  remarks       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_quote_lines_quote ON quotation_lines(quotation_id);
 

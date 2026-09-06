@@ -114,7 +114,7 @@ export function importCatalogue(filePath, { sheet, replace = false, mapping: giv
  * quotes far more than it stocks, so only a slice of the catalogue is stocked
  * — and the leftover is a genuine "quotable but not stocked" gap, not a bug.
  */
-export function writeTallySeed({ stockedFraction = 0.32 } = {}) {
+export function writeTallySeed({ stockedFraction = 0.38 } = {}) {
   const items = db
     .prepare('SELECT code, name, brand, category, units, list_rate, gst_rate, hsn FROM catalogue_items ORDER BY code')
     .all();
@@ -131,7 +131,14 @@ export function writeTallySeed({ stockedFraction = 0.32 } = {}) {
     return (x >>> 0) / 4294967296;
   };
 
-  const stocked = items.filter((i) => hash(i.code) < stockedFraction);
+  // A distributor stocks fast-moving consumables and orders expensive kit in
+  // against a confirmed order, so the chance of an item being on the shelf
+  // falls away as its price rises. Without this the simulated godown holds
+  // several crores of chain blocks nobody keeps in stock.
+  const weightFor = (rate) => (rate < 5000 ? 1 : rate < 25000 ? 0.45 : rate < 100000 ? 0.12 : 0.03);
+  const stocked = items.filter(
+    (i) => hash(i.code) < stockedFraction * weightFor(Number(i.list_rate) || 0)
+  );
   const seedPath = path.join(config.root, 'data', 'tally-seed.json');
   fs.writeFileSync(
     seedPath,

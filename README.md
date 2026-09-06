@@ -35,6 +35,8 @@ Other commands:
 | `npm run sync:once` | Run one full sync and exit (usable from cron) |
 | `npm run tally:mock` | Run just the simulated Tally, e.g. to point another tool at it |
 | `npm run db:reset` | Delete the local mirror. **Tally is not touched.** |
+| `npm run catalogue:import -- <file.xlsx>` | Import a price list |
+| `npm run catalogue:match` | Re-match the catalogue against Tally |
 
 ---
 
@@ -107,6 +109,17 @@ stop being loaded and can be deleted.
 
 ## What each screen is, and is not
 
+**Quotations** *(Phase 2)* — the replacement for the standalone quotation tool.
+Search the 12,261-SKU catalogue, see live Tally stock and **the rate this
+customer was last actually charged** against every line, and copy the finished
+quotation for email in the same format the old tool produced. Adds what that
+tool could not hold: a customer, a quote number, and revisions. A quotation
+that has been marked sent is locked — it is the record of what the customer was
+given — and *Revise* creates the next version alongside it.
+
+**Catalogue** — all 12,261 price-list SKUs with their Tally match state. See
+"The catalogue and the price list" below.
+
 **Overview** — stock value, receivables, overdue, pending dispatch, a 30-day
 sales line, ageing, orders sitting too long, and items below reorder level.
 
@@ -135,6 +148,54 @@ Straight from the plan, and still true of this build:
   information faster to see. It does not stop a dispatch going out before
   accounts have cleared it. That is Phase 2.
 - Nothing is written back to Tally. Tally remains the system of record.
+
+---
+
+## The catalogue and the price list
+
+`npm run catalogue:import -- data/balaji-price-list-2026-09-01.xlsx`
+
+Reads the price-list workbook with the same header guesses the existing
+quotation tool uses, so the same file works in both. It adds normalisation that
+tool does not do, and reports what it found:
+
+| | |
+| --- | --- |
+| SKUs | 12,261 across 6 brands |
+| Key | Part No — unique across every row, including across brands |
+| Missing HSN | 3,976 — every Taparia and every Groz row |
+| Odd GST | written three ways: `GST 18%`, `18`, `5% GST` |
+| Zero price | 8 items |
+| Category | derived from the description; ~91% land in a real one |
+
+**The missing HSN matters later.** It is fine for quoting, but Phase 3 writes
+GST invoices into Tally, and those need an HSN per line. Filling it in for
+Taparia and Groz is a data job worth starting before Phase 3, not during it.
+
+### Matching the catalogue to Tally
+
+Two separately-maintained lists: the price list is keyed on the manufacturer's
+part number, Tally items are named however whoever created them decided. The
+matcher runs three passes, most trustworthy first, and records which one made
+each match:
+
+1. `exact` — Tally's part number equals the catalogue code
+2. `code-in-name` — the code appears inside the Tally item's name
+3. `name` — descriptions normalise to the same string
+4. otherwise **left unmatched**, and listed
+
+Two rules keep this honest. A Tally item can be claimed by only one catalogue
+code, so two SKUs can never quietly read the same stock figure. And nothing is
+matched on a similarity score — an unmatched item is still quotable, you just
+do not get a live stock figure against it.
+
+Against the simulated Tally this matches **99% of stocked items**. Re-run it any
+time with `npm run catalogue:match`; a sync runs it automatically whenever stock
+changes.
+
+When the real Tally is connected, this match rate is the number to watch. A low
+one means the two lists have drifted, not that the matcher is broken — the
+Catalogue screen shows both directions of the gap.
 
 ---
 

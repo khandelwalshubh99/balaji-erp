@@ -240,8 +240,10 @@ function stockFromSeed(seedItems, rand, between, intBetween) {
     const sell = Number(item.list_rate) || 0;
     const cost = sell > 0 ? round2(sell / between(1.14, 1.38)) : 0;
 
-    // Hold roughly Rs 8k-70k of value per stocked line.
-    const nominal = cost > 0 ? Math.min(2500, Math.max(1, Math.round(between(8000, 70000) / cost))) : 0;
+    // Sized so total inventory lands near Rs 2.5-3 Cr against roughly Rs 1.2 Cr
+    // of monthly sales -- a bit over two months of cover, which is what a
+    // distributor of this shape actually carries.
+    const nominal = cost > 0 ? Math.min(2500, Math.max(1, Math.round(between(1200, 9000) / cost))) : 0;
 
     return {
       guid: `sim-item-${i + 1}`,
@@ -255,10 +257,10 @@ function stockFromSeed(seedItems, rand, between, intBetween) {
       category: item.category || 'General Hardware',
       brand,
       baseUnits: item.units || 'Nos',
-      closingQty: rand() < 0.05 ? 0 : Math.round(nominal * between(0.3, 1.8)),
+      closingQty: rand() < 0.05 ? 0 : Math.round(nominal * between(0.5, 2.2)),
       costRate: cost,
       sellRate: sell,
-      reorderLevel: Math.max(2, Math.round(nominal * between(0.15, 0.4))),
+      reorderLevel: Math.max(1, Math.round(nominal * between(0.15, 0.4))),
       gstRate: Number(item.gst_rate) || 18,
       hsn: item.hsn || '',
     };
@@ -288,6 +290,7 @@ export function buildCompany(seedStr, now = new Date(), stockSeed = null) {
           const margin = between(1.14, 1.38);
           // Hold roughly Rs 8k-70k of value per SKU, so a Rs 32,000 chain block
           // sits in ones and twos while Rs 4 washers sit in thousands.
+          // (Only used for the invented fallback catalogue.)
           const targetValue = between(8000, 70000);
           const nominalQty = Math.min(2500, Math.max(1, Math.round(targetValue / cost)));
           // Reorder level is a standing policy on the item, so it is derived from

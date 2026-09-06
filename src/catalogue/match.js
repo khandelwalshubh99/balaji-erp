@@ -226,7 +226,7 @@ export function matchSummary() {
  * Catalogue rows joined to whatever Tally knows about them.
  * This is the query the quotation screen quotes from.
  */
-export function searchCatalogue({ search = '', brand = '', category = '', stocked = 'all', limit = 50 } = {}) {
+export function searchCatalogue({ search = '', brand = '', category = '', stocked = 'all', customer = '', limit = 50 } = {}) {
   const where = [];
   const params = {};
 
@@ -240,11 +240,28 @@ export function searchCatalogue({ search = '', brand = '', category = '', stocke
   else if (stocked === 'no') where.push('c.tally_guid IS NULL');
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  // When quoting for a named customer, carry the rate they were last actually
+  // charged for each item. One windowed pass over their sales history rather
+  // than a lookup per line.
+  const withLastRate = Boolean(customer);
+  if (withLastRate) params.customer = customer;
+
   const rows = db.prepare(
-    `SELECT c.code, c.name, c.brand, c.category, c.units, c.list_rate, c.gst_rate, c.hsn,
-            c.match_method, s.closing_qty, s.base_units, s.closing_rate, s.reorder_level
+    `${withLastRate ? `WITH last_sale AS (
+       SELECT si.guid AS item_guid, vl.rate, v.date, v.voucher_number,
+              ROW_NUMBER() OVER (PARTITION BY si.guid ORDER BY v.date DESC, v.guid DESC) AS rn
+       FROM tally_voucher_lines vl
+       JOIN tally_vouchers v ON v.guid = vl.voucher_guid
+       JOIN tally_stock_items si ON si.name = vl.item_name
+       WHERE v.voucher_type = 'Sales' AND v.party_name = @customer
+     )` : ''}
+     SELECT c.code, c.name, c.brand, c.category, c.units, c.list_rate, c.gst_rate, c.hsn,
+            c.match_method, c.tally_guid, s.closing_qty, s.base_units, s.closing_rate, s.reorder_level
+            ${withLastRate ? ', ls.rate AS last_rate, ls.date AS last_rate_date, ls.voucher_number AS last_rate_invoice' : ''}
      FROM catalogue_items c
      LEFT JOIN tally_stock_items s ON s.guid = c.tally_guid
+     ${withLastRate ? 'LEFT JOIN last_sale ls ON ls.item_guid = c.tally_guid AND ls.rn = 1' : ''}
      ${clause}
      ORDER BY (c.tally_guid IS NULL), c.brand, c.name
      LIMIT @limit`

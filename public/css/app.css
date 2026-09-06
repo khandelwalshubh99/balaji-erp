@@ -240,3 +240,55 @@ pre.xml {
 
 .spark { display: block; width: 100%; height: 56px; }
 .loading { padding: 40px; text-align: center; color: var(--text-faint); }
+
+/* --- quotation composer ---------------------------------------------------- */
+.quote-grid { display: grid; grid-template-columns: 1fr 300px; gap: 14px; align-items: start; }
+@media (max-width: 1100px) { .quote-grid { grid-template-columns: 1fr; } }
+
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-faint); margin-bottom: 5px; }
+.field input, .field select, .field textarea {
+  width: 100%; padding: 7px 10px; border: 1px solid var(--border-strong); border-radius: 6px;
+  background: var(--surface); color: var(--text); font: inherit;
+}
+.field textarea { min-height: 78px; resize: vertical; line-height: 1.5; }
+
+.searchbox { position: relative; }
+.results {
+  position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(16,24,40,0.14); max-height: 380px; overflow: auto;
+}
+.result {
+  display: grid; grid-template-columns: 1fr auto; gap: 10px;
+  padding: 9px 12px; border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.result:last-child { border-bottom: 0; }
+.result:hover, .result.active { background: var(--accent-soft); }
+.result .title { font-weight: 550; }
+.result .meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px;
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.result .rates { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.result .rates .list { font-weight: 600; }
+.result .rates .last { font-size: 11.5px; color: var(--accent); margin-top: 2px; }
+
+.lines input { width: 100%; padding: 4px 6px; border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: var(--text); font: inherit; text-align: right; }
+.lines input:hover { border-color: var(--border); }
+.lines input:focus { outline: 2px solid var(--accent); outline-offset: -1px; background: var(--surface); }
+.lines input.text { text-align: left; }
+.lines td { padding: 5px 8px; }
+.lines .del { background: none; border: 0; color: var(--text-faint); cursor: pointer; font-size: 15px; padding: 0 4px; }
+.lines .del:hover { color: var(--bad); }
+
+.totals { display: grid; gap: 6px; }
+.totals .row { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+.totals .row.grand { border-top: 2px solid var(--text); margin-top: 6px; padding-top: 8px;
+  font-size: 17px; font-weight: 650; }
+
+.credit-panel { display: grid; gap: 8px; font-size: 12.5px; }
+.credit-panel .row { display: flex; justify-content: space-between; gap: 8px; }
+.credit-panel .row span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+.status-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
