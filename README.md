@@ -5,9 +5,14 @@ A self-hosted, Tally-connected dashboard, built to the phased plan in
 
 **Built so far: Phase 0, Phase 1, and all of Phase 2.** The full
 RFQ → Quotation → Order → Dispatch → Invoice chain has screens, and enquiries
-and purchase orders arrive on their own from Gmail. Write-back to Tally is next
-— and worth starting only once this data has been trusted for a while, because
-write-back errors cost far more to unwind than read errors.
+and purchase orders arrive on their own from Gmail.
+
+**The Tally connection is read-only, and that is now a decision rather than a
+stage.** The original plan had a Phase 3 writing sales vouchers back into
+Tally; that is not being built. Vouchers stay a job done in Tally by the people
+who do it now. Every request this app sends is a `TALLYREQUEST > Export`, there
+is no Import path in the codebase, and nothing here can create, alter or delete
+anything inside Tally.
 
 **Two systems hold the data, and only two.** Tally holds the ledgers, stock and
 bills. A **Google Sheet** holds everything Tally does not — quotations, orders,
@@ -362,9 +367,10 @@ tool does not do, and reports what it found:
 | Zero price | 8 items |
 | Category | derived from the description; ~91% land in a real one |
 
-**The missing HSN matters later.** It is fine for quoting, but Phase 3 writes
-GST invoices into Tally, and those need an HSN per line. Filling it in for
-Taparia and Groz is a data job worth starting before Phase 3, not during it.
+**The missing HSN is worth filling in anyway.** It does not block quoting, and
+now that nothing is written back to Tally it blocks nothing at all — but an HSN
+per line is what a GST invoice needs, and having it on the quotation is what
+saves the person raising that invoice in Tally from looking it up again.
 
 ### Matching the catalogue to Tally
 

@@ -6,8 +6,12 @@
  * rest — the run is marked `partial` and the dashboard says so, rather than
  * quietly showing stale numbers as if they were fresh.
  *
- * Direction is strictly Tally -> here. Nothing is written back to Tally until
- * Phase 3, and that is deliberate.
+ * Direction is strictly Tally -> here, permanently. Nothing in this application
+ * writes to Tally: every request it sends is an Export, and there is no Import
+ * path anywhere in the codebase. Write-back was in the original plan and has
+ * been dropped, so this is a property to preserve rather than a stage to pass
+ * through -- if a future change needs to put something into Tally, that is a
+ * decision to take deliberately and not a helper to add quietly here.
  */
 import { db } from '../db/index.js';
 import { config } from '../config.js';

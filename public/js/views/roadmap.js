@@ -42,8 +42,8 @@ const PHASES = [
   {
     n: '3',
     name: 'Write-back to Tally',
-    state: 'next',
-    what: 'A cleared order creates its own sales voucher in Tally. Only worth starting once Phase 2 data is trusted — write-back errors cost far more to unwind.',
+    state: 'dropped',
+    what: 'Not being built. The plan had a cleared order creating its own sales voucher in Tally; the decision is that vouchers stay a job done in Tally by the people who do it now. The connection is read-only and stays that way — every request this app sends is an Export, and there is no code path that can create or alter anything in Tally.',
   },
   {
     n: '4',
@@ -53,8 +53,8 @@ const PHASES = [
   },
 ];
 
-const TONE = { built: 'ok', next: 'accent', later: '' };
-const LABEL = { built: 'Built', next: 'Next', later: 'Later' };
+const TONE = { built: 'ok', next: 'accent', later: '', dropped: 'warn' };
+const LABEL = { built: 'Built', next: 'Next', later: 'Later', dropped: 'Not doing' };
 
 export async function render(el) {
   el.innerHTML = html`

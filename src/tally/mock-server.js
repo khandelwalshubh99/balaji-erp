@@ -207,9 +207,6 @@ export function createMockTallyServer({ seed = 'balaji-2026', failureRate = 0, l
   const company = buildCompany(seed, new Date(), stockSeed);
   company.companyName = companyName;
 
-  /** Vouchers pushed IN by the app (Phase 3 write-back lands here). */
-  const imported = [];
-
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => (body += c));
@@ -253,16 +250,17 @@ export function createMockTallyServer({ seed = 'balaji-2026', failureRate = 0, l
 
       driftStock(company, (Date.now() - bootedAt) / 60000);
 
+      // Import used to be accepted here, for the write-back phase that is no
+      // longer being built. It is refused rather than left in place, and the
+      // refusal is the point: this simulator is where an accidental write
+      // would first show up, and one that quietly answered CREATED:1 would
+      // let it pass every test and only be discovered against the real Tally
+      // in the office. Anything that is not a read fails loudly instead.
       if (request === 'Import') {
-        const list = env.BODY?.DATA?.TALLYMESSAGE;
-        const msgs = Array.isArray(list) ? list : list ? [list] : [];
-        const vouchers = msgs.map((m) => m.VOUCHER).filter(Boolean);
-        vouchers.forEach((v) => imported.push(v));
-        log(`import: ${vouchers.length} voucher(s)`);
+        log('REFUSED import — this ERP does not write to Tally');
         return send(
-          `<RESPONSE><CREATED>${vouchers.length}</CREATED><ALTERED>0</ALTERED><DELETED>0</DELETED>` +
-            `<LASTVCHID>${9000 + imported.length}</LASTVCHID><LASTMID>0</LASTMID>` +
-            `<COMBINED>0</COMBINED><IGNORED>0</IGNORED><ERRORS>0</ERRORS></RESPONSE>`
+          errorEnvelope('This company is read-only to the ERP. Write-back was dropped; vouchers are raised in Tally.'),
+          200
         );
       }
 
@@ -288,7 +286,7 @@ export function createMockTallyServer({ seed = 'balaji-2026', failureRate = 0, l
     });
   });
 
-  return { server, company, imported };
+  return { server, company };
 }
 
 /**
