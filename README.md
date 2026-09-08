@@ -3,13 +3,22 @@
 A self-hosted, Tally-connected dashboard, built to the phased plan in
 `Balaji_Enterprises_Custom_ERP_Plan.docx`.
 
-**Built so far: Phase 0, Phase 1, and Phase 2 up to Order Received.** The
-RFQ → Quotation → Order → Dispatch → Invoice model is in the database;
-Quotations and Orders have screens. Picking and dispatch is next — that is the
-stage that stops a short shipment being discovered days later.
+**Built so far: Phase 0, Phase 1, and all of Phase 2.** The full
+RFQ → Quotation → Order → Dispatch → Invoice chain has screens, and enquiries
+and purchase orders arrive on their own from Gmail. Write-back to Tally is next
+— and worth starting only once this data has been trusted for a while, because
+write-back errors cost far more to unwind than read errors.
+
+**Two systems hold the data, and only two.** Tally holds the ledgers, stock and
+bills. A **Google Sheet** holds everything Tally does not — quotations, orders,
+dispatches, invoices, the audit trail — written to by the ERP and by the Gmail
+sweep. This machine's `data/balaji.db` is a copy of both and holds nothing of
+its own, which is a claim you can check: `npm run db:reset && npm start` gives
+you back the order book. See [docs/sheets-store.md](docs/sheets-store.md).
 
 Right now it runs against a **simulated TallyPrime** so the whole thing can be
-used and judged before anyone touches the office machine.
+used and judged before anyone touches the office machine, and there is a
+simulated sheet for the same reason.
 
 ---
 
@@ -36,9 +45,18 @@ Other commands:
 | `npm run tally:probe -- stock` | Pull one dataset and print the first record |
 | `npm run sync:once` | Run one full sync and exit (usable from cron) |
 | `npm run tally:mock` | Run just the simulated Tally, e.g. to point another tool at it |
-| `npm run db:reset` | Delete the local mirror. **Tally is not touched.** |
+| `npm run db:reset` | Delete the local copy. **Neither Tally nor the sheet is touched.** |
 | `npm run catalogue:import -- <file.xlsx>` | Import a price list |
 | `npm run catalogue:match` | Re-match the catalogue against Tally |
+| `npm run dispatch:test` | Run picking and dispatch end to end against a throwaway database |
+| `npm run invoice:test` | Run invoicing and the payment clock against a throwaway database |
+| `npm run mail:test` | Run the Gmail pipeline end to end against a throwaway database |
+| `npm run mail:demo` | Boot the app on port 4100 against that sample mail |
+| `npm run sheets:pull` | Read the Google Sheet into this machine now |
+| `npm run sheets:push` | Send queued changes to the sheet |
+| `npm run sheets:push -- --all` | Replace every ERP-owned tab from this machine |
+| `npm run sheets:verify` | Push, destroy the database, pull, prove everything came back |
+| `npm run sheets:demo` | Boot the app on port 4200 against a simulated sheet |
 
 ---
 
@@ -135,11 +153,107 @@ left. Nobody has to remember to mark an order part-shipped, which is the whole
 point. An order that has shipped in part or full can no longer be edited or
 cancelled — adjust the dispatch instead.
 
-Purchase orders can also arrive **straight from Gmail**: the existing Apps
-Script scrape pushes each new PO in, and it lands in the **Items not entered**
-queue with its Drive link, ready for someone to key the items against the
-catalogue. Duplicates are caught on the source document, the PO number and the
-value. See [docs/gmail-po-ingest.md](docs/gmail-po-ingest.md).
+Purchase orders mostly arrive **straight from Gmail** — see **Mail** below.
+They land in the **Items not entered** queue with the PO pdf linked, ready for
+someone to key the items against the catalogue.
+
+**Dispatch** *(Phase 2)* — picking, what actually left, and the LR.
+
+A pick list starts from what is **outstanding**, prefilled, because the common
+case is "send all of it" and the exceptional case should be changing one number
+rather than building a list from nothing. Typing a short quantity says so
+immediately, on the line, while the person is still standing at the rack: the
+balance stays outstanding and comes straight back to the pick queue. A short
+shipment noticed on the loading bay costs nothing; one noticed by the customer
+costs the order, and that gap is the entire reason this stage exists.
+
+Four states, and what they mean: **picking** (a list, nothing has moved),
+**packed** (staged, still here), **dispatched** (it has left), **delivered**.
+Only the last two count towards fulfilment, which is why a pick list can be
+discarded without a trace and a dispatch cannot be un-sent. Once it has gone the
+quantities are frozen — an interface that lets someone quietly edit them a week
+later cannot be used to settle a dispute about a short delivery.
+
+Three things worth knowing:
+
+- **Two open pick lists never promise the same stock.** Quantities sitting in
+  somebody else's list are shown as allocated and excluded from what this one
+  may take. Without that, two people picking the same order are each shown the
+  full outstanding quantity, both pick it, and the second lorry leaves with
+  stock that is not there.
+- **The LR is not required to mark something dispatched.** It usually arrives
+  after the vehicle has. Requiring it gives two bad outcomes — a dispatch
+  recorded late, or a placeholder typed in for ever — so it goes out without
+  one and sits in an **Awaiting LR** queue until the receipt turns up.
+- **A substitution names what actually went** while still answering the ordered
+  line, so the order can still be shown as fulfilled and the customer's box
+  still matches the record.
+
+**Invoices** *(Phase 2)* — the link between a consignment and its Tally bill,
+and nothing more than that.
+
+**No payment clock runs here, and none ever will.** Whether a bill is paid,
+part paid or overdue is asked of Tally each time the screen loads and never
+stored. A local `paid` flag is wrong the moment somebody receipts a cheque in
+Tally without telling anyone, and a dashboard that chases a customer who paid
+last Tuesday costs more goodwill than the dashboard is worth.
+
+**Invoice numbers are Tally's too.** The tax invoice is a statutory document
+and its number belongs to Tally's GST sequence; a BE/INV series issued here
+would be a second sequence disagreeing with the filed one — the kind of
+disagreement discovered by a tax officer rather than by us. So the number is
+typed in from the invoice that was raised, and the app then goes looking for
+the bill.
+
+Which makes **the match the whole job**, and three rules do it:
+
+- **The party has to agree.** Matching on the reference alone links an invoice
+  to a same-numbered bill belonging to somebody else. It does not throw, it does
+  not look wrong on any screen, and it produces a payment chase addressed to the
+  wrong company. A same-numbered bill against a different party is *offered* to
+  a person to link by hand, never linked by a rule.
+- **A bill that vanishes has been paid, not lost.** Tally stops returning a bill
+  once it is settled in full. "Matched once, gone now" is therefore *paid*;
+  "never matched" is *not found*. The two are indistinguishable if you only look
+  at whether a bill is there today, which is why the match is timestamped.
+- **Amounts that disagree are flagged.** A reference typed one digit out can
+  still be a genuine bill for the right customer — the party rule passes, nothing
+  throws, and every figure shown belongs to a different consignment. The amounts
+  are the only thing that gives it away, so a material difference says so.
+
+The first tile on the screen is **Gone, not invoiced** rather than the money
+owed, because a consignment that left three weeks ago with no invoice is worse
+than an overdue one: nothing is chasing it, since no clock has started.
+
+**Mail** *(Phase 2)* — every mail in the account, threaded by what it is *about*
+rather than by who replied to what, and given a number. A purchase order becomes
+an order with a BE/SO number; an enquiry becomes a draft quotation with a BE/Q
+number; anything the rules cannot call gets no number and waits in one queue.
+
+The threading is the point. A customer enquires in September, gets a quotation,
+and in October starts a **brand new mail** with their PO attached — Gmail calls
+those two conversations, the business calls them one. So a thread is keyed on
+*the customer plus the reference they wrote in the subject*, and a Gmail
+conversation is only one of the ways messages arrive into it. The enquiry, the
+quotation, the PO, the delivery chase and the payment advice sit on one record.
+
+Two rules stop that being reckless. A reference never keys a thread on its own —
+two customers both writing "PO 1234" is not a coincidence, it is Tuesday — and
+an unknown sender is never keyed on a free-mail domain, because gmail.com is not
+a company. Both are enforced by a unique index rather than by whichever code
+happens to run first.
+
+It refuses to guess, and refusing is a normal outcome rather than an error. An
+unclassified mail costs ten seconds in a queue; a mail filed as the wrong kind
+mints a number in the wrong sequence against the wrong customer, and is found
+weeks later by whoever is chasing the payment.
+
+The Apps Script that feeds it is in
+[scripts/erp-mail-sweep.gs](scripts/erp-mail-sweep.gs); the setup, the
+rules, and why it is safe to leave running are in
+[docs/gmail-mail-ingest.md](docs/gmail-mail-ingest.md). `npm run mail:demo`
+boots the app against sample mail if you want to see the screen with something
+in it first.
 
 **Catalogue** — all 12,261 price-list SKUs with their Tally match state. See
 "The catalogue and the price list" below.
@@ -235,16 +349,34 @@ src/
     index.js           SQLite connection + user seeding
     queries.js         read models for the dashboard (never touches Tally)
   sync/engine.js       scheduled pull; per-dataset transactions and logging
-  routes/              auth.js, api.js
+  dispatch/service.js  picking, what left, the LR; order status derives from it
+  invoices/service.js  the link to a Tally bill. No payment state is stored here
+  routes/              auth.js, api.js, ingest.js
   tally/               see above
+  sheets/
+    tabs.js            what lives in which column, in ONE declaration, both ways
+    client.js          the only thing that talks to the sheet; outbound only
+    store.js           push, pull, the outbox, the scheduler
+    state.js           has the sheet been read yet — the guard on numbering
+    mock-server.js     runs the real .gs behind fake Google services
 public/                no build step — plain ES modules, one CSS file
-scripts/               tally-probe, sync-once, run-mock-tally, db-reset
+scripts/               tally-probe, sync-once, run-mock-tally, db-reset,
+                       erp-mail-sweep.gs and erp-sheet-api.gs (paste into Google)
 ```
 
 Deliberate choices worth knowing about:
 
 - **SQLite, no build step, no bundler.** This has to run unattended on an office
   PC for years. `npm start` and nothing else.
+- **The local database is a copy, never the record.** Tally and the sheet are
+  the two stores. `npm run db:reset` is the test of that, not a disaster.
+- **Every call to Google is outbound.** The mail sweep pushes in and needs a
+  tunnel; the store reaches out and does not. That is why connecting the store
+  is pasting two values into a screen rather than configuring a router.
+- **Numbering refuses rather than risks a collision.** With a sheet connected
+  and not yet read, no new BE/Q or BE/SO number is issued. Another machine may
+  have issued the next one an hour ago, and one number reaching two customers
+  is found out weeks later by whoever is chasing the payment.
 - **Each sync dataset commits separately.** One bad dataset marks the run
   `partial` and the dashboard says so, instead of quietly serving stale numbers
   as if they were fresh.

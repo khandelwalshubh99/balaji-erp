@@ -13,7 +13,7 @@ db.pragma('foreign_keys = ON');
 // Applied in order on every boot. Each file must be idempotent (CREATE TABLE
 // IF NOT EXISTS), so starting the app is always safe regardless of which
 // phases were present last time.
-for (const file of ['schema.sql', 'phase2.sql']) {
+for (const file of ['schema.sql', 'phase2.sql', 'mail.sql', 'sheets.sql']) {
   db.exec(fs.readFileSync(path.join(config.root, 'src', 'db', file), 'utf8'));
 }
 
@@ -34,6 +34,12 @@ addColumn('orders', 'source_ref', 'TEXT');
 addColumn('orders', 'document_url', 'TEXT');
 addColumn('order_lines', 'brand', 'TEXT');
 addColumn('order_lines', 'hsn', 'TEXT');
+// A quotation can now come from somewhere, exactly as an order can. Same three
+// columns, same meaning, so "where did this come from" is one question with one
+// answer whichever end of the pipeline you are standing at.
+addColumn('quotations', 'source', "TEXT NOT NULL DEFAULT 'manual'");
+addColumn('quotations', 'source_ref', 'TEXT');
+addColumn('quotations', 'document_url', 'TEXT');
 
 /** Columns that were tried and are no longer used. */
 function dropColumn(table, column) {
@@ -52,6 +58,10 @@ db.exec(`
   -- number as an amendment, so same-number orders are surfaced for a decision
   -- rather than blocked.
   CREATE INDEX IF NOT EXISTS idx_orders_po_number ON orders(customer_po_number);
+  -- The same guarantee for quotations: one enquiry mail can never quietly
+  -- produce two quote numbers, however many times the script pushes it.
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_quotations_source_ref
+    ON quotations(source_ref) WHERE source_ref IS NOT NULL;
 `);
 
 /**

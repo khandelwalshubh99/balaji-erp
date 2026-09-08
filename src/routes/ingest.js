@@ -1,10 +1,13 @@
 /**
- * Purchase-order ingest.
+ * Gmail ingest.
  *
- * The one endpoint reachable without a session, so it is the one place worth
- * being careful about. It exists so the existing Gmail -> Apps Script scrape
- * can push each new purchase order straight in, rather than this application
- * holding Google credentials and polling a sheet.
+ * The only endpoints reachable without a session, so the one place worth being
+ * careful about. They exist so an Apps Script sweep of Gmail can push mail
+ * straight in, rather than this application holding Google credentials and
+ * polling a sheet.
+ *
+ *   POST /api/ingest/mail            every mail, classified and threaded here
+ *   POST /api/ingest/purchase-order  the older single-purpose push, still live
  *
  * Rules it follows:
  *   - Fails CLOSED. No INGEST_TOKEN configured means the endpoint is off.
@@ -20,6 +23,7 @@ import { config } from '../config.js';
 import { db } from '../db/index.js';
 import { matchCustomer } from '../customers/service.js';
 import * as orders from '../orders/service.js';
+import { ingestBatch } from '../mail/service.js';
 
 export const ingestRouter = Router();
 
@@ -74,6 +78,47 @@ function safeUrl(v) {
 ingestRouter.get('/api/ingest/ping', authorise, (_req, res) =>
   res.json({ ok: true, service: 'balaji-erp purchase-order ingest' })
 );
+
+/**
+ * A sweep of Gmail, in one call.
+ *
+ * Batched because a ten-minute trigger in Apps Script has a fixed budget of
+ * URL fetches, and a busy morning is fifty mails. Each message is recorded in
+ * its own transaction and gets its own result, so one malformed mail cannot
+ * cost the other forty-nine — the script logs that one and moves on.
+ *
+ * Every result names what happened to that message: created, duplicate, or
+ * error, with the id it landed against. That is what lets the script write the
+ * ERP's number back onto the Gmail thread as a label.
+ */
+const MAX_BATCH = 100;
+
+ingestRouter.post('/api/ingest/mail', authorise, (req, res) => {
+  const body = req.body || {};
+  const messages = Array.isArray(body) ? body : Array.isArray(body.messages) ? body.messages : [body];
+  if (!messages.length) return res.status(400).json({ error: 'No messages in this push' });
+  if (messages.length > MAX_BATCH) {
+    return res.status(413).json({ error: `Too many messages in one push (${messages.length}); send at most ${MAX_BATCH}.` });
+  }
+
+  try {
+    const out = ingestBatch(messages);
+    const minted = out.results.filter((r) => r.minted).length;
+    console.log(
+      `[mail] ${out.received} in from ${req.ip}: ${out.created} new, ${out.duplicates} already seen, ` +
+      `${minted} record${minted === 1 ? '' : 's'} raised, ${out.errors} failed`
+    );
+    res.json(out);
+  } catch (err) {
+    console.error('[mail] batch failed:', err.message);
+    // 503, not 500, when the store has not been read yet. The sweep treats a
+    // 5xx as the ERP being down: it labels nothing and leaves its watermark
+    // where it is, so the same window is swept again once the sheet is back.
+    // A 4xx would label these mails ERP/Failed and never retry them, which for
+    // a temporary condition is the wrong answer permanently.
+    res.status(err.name === 'SheetNotReadyError' ? 503 : 500).json({ error: err.message });
+  }
+});
 
 ingestRouter.post('/api/ingest/purchase-order', authorise, (req, res) => {
   const body = req.body || {};
@@ -151,6 +196,8 @@ ingestRouter.post('/api/ingest/purchase-order', authorise, (req, res) => {
     });
   } catch (err) {
     console.error('[ingest] failed:', err.message);
-    res.status(400).json({ error: err.message });
+    // See the mail endpoint above: "not read yet" is temporary and must come
+    // back as a retryable 5xx rather than a permanent refusal.
+    res.status(err.name === 'SheetNotReadyError' ? 503 : 400).json({ error: err.message });
   }
 });

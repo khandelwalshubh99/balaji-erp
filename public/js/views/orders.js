@@ -151,6 +151,90 @@ function creditCard(credit, orderValue, { snapshot = null } = {}) {
     </div>`, { note: 'from Tally' });
 }
 
+
+const INVOICE_TONE = { unmatched: 'bad', overdue: 'bad', outstanding: 'accent', paid: 'ok' };
+
+/**
+ * What has been billed against this order, and where the money is.
+ *
+ * The position on each row is Tally's, computed as the page loaded. Nothing
+ * about payment is held in this database, so there is no version of this that
+ * can be out of date by more than one sync.
+ */
+function invoiceCard(o) {
+  const invoiced = (o.invoices || []).reduce((n, i) => n + (i.amount || 0), 0);
+  const uninvoiced = o.dispatches.filter(
+    (d) => ['dispatched', 'delivered'].includes(d.status) && !(o.invoices || []).some((i) => i.dispatch_id === d.id)
+  );
+
+  return card('Invoices',
+    (o.invoices || []).length
+      ? `<div class="table-wrap" style="max-height:none"><table>
+          <thead><tr><th>Invoice</th><th>Date</th><th>DN</th><th class="num">Amount</th><th class="num">Owed</th><th>Position</th></tr></thead>
+          <tbody>${o.invoices.map((i) => `<tr data-invoice="${i.id}" style="cursor:pointer">
+            <td class="mono nowrap">${esc(i.invoice_number)}</td>
+            <td class="dim nowrap">${shortDate(i.invoice_date)}</td>
+            <td class="mono faint nowrap">${esc(i.dispatch_number || '—')}</td>
+            <td class="num">${money(i.amount)}</td>
+            <td class="num ${i.position.status === 'overdue' ? 'bad' : ''}">${
+              i.position.outstanding === null ? '—' : money(i.position.outstanding)}</td>
+            <td><span class="pill ${INVOICE_TONE[i.position.status] || ''}">${esc(i.position.label)}</span></td>
+          </tr>`).join('')}</tbody></table></div>
+          ${uninvoiced.length
+            ? `<div class="callout warn" style="margin:12px 16px 16px">
+                 ${uninvoiced.length} consignment${uninvoiced.length === 1 ? '' : 's'} on this order
+                 ${uninvoiced.length === 1 ? 'has' : 'have'} gone out with no invoice against
+                 ${uninvoiced.length === 1 ? 'it' : 'them'}. <a href="#/invoices">Record ${uninvoiced.length === 1 ? 'it' : 'them'}</a>.
+               </div>`
+            : ''}`
+      : uninvoiced.length
+        ? `<div class="callout warn" style="margin:0">
+             <strong>Nothing has been invoiced yet</strong>, and ${uninvoiced.length}
+             consignment${uninvoiced.length === 1 ? ' has' : 's have'} already gone out.
+             Until an invoice is recorded and matched to its Tally bill, no payment clock is running on this order.
+             <div style="margin-top:8px"><a href="#/invoices">Go to invoices</a></div>
+           </div>`
+        : emptyState('Nothing invoiced. Invoices are raised in Tally and recorded here once a consignment has gone.'),
+    {
+      flush: (o.invoices || []).length > 0,
+      note: invoiced ? `${money(invoiced)} of ${money(o.total)} billed` : '',
+    });
+}
+
+const DISPATCH_TONE = { picking: 'accent', packed: 'warn', dispatched: '', delivered: 'ok' };
+const DISPATCH_LABEL = { picking: 'Picking', packed: 'Packed', dispatched: 'In transit', delivered: 'Delivered' };
+
+/**
+ * What has gone out against this order, and the way to send the rest.
+ *
+ * On the order screen rather than only on the dispatch screen because the
+ * question "has this shipped?" is asked while looking at the order, and an
+ * answer that requires navigating somewhere else is an answer people guess at.
+ */
+function dispatchCard(o) {
+  const canPick = o.status !== 'cancelled' && o.lines.length > 0
+    && o.lines.some((l) => l.qty_ordered - l.qty_dispatched > 0);
+
+  return card('Dispatches',
+    o.dispatches.length
+      ? `<div class="table-wrap" style="max-height:none"><table>
+          <thead><tr><th>DN</th><th>LR</th><th>Transporter</th><th>Left</th><th>Status</th></tr></thead>
+          <tbody>${o.dispatches.map((d) => `<tr data-dispatch="${d.id}" style="cursor:pointer">
+            <td class="mono nowrap">${esc(d.dispatch_number)}</td>
+            <td class="mono ${(d.status === 'dispatched' || d.status === 'delivered') && !d.lr_number ? 'warn' : 'faint'}">${
+              esc(d.lr_number || ((d.status === 'dispatched' || d.status === 'delivered') ? 'none yet' : '—'))}</td>
+            <td class="dim truncate">${esc(d.transporter || '—')}</td>
+            <td class="dim nowrap">${d.dispatched_at ? shortDate(d.dispatched_at) : '—'}</td>
+            <td><span class="pill ${DISPATCH_TONE[d.status] || ''}">${DISPATCH_LABEL[d.status] || d.status}</span></td>
+          </tr>`).join('')}</tbody></table></div>`
+      : emptyState(o.lines.length ? 'Nothing has gone out yet.' : 'Enter the items first — there is nothing to pick.'),
+    {
+      flush: o.dispatches.length > 0,
+      actions: canPick ? '<button class="btn small" id="pick">Start picking</button>' : '',
+      note: canPick ? '' : o.status === 'dispatched' ? 'complete' : '',
+    });
+}
+
 const linesTable = (lines, { editable, showDispatched = false }) => `
   <div class="table-wrap" style="max-height:none"><table class="lines">
     <thead><tr>
@@ -239,6 +323,14 @@ async function detail(el, id) {
               </div>` : ''}
              ${linesTable(model.lines, { editable, showDispatched: !editable })}`,
             { note: `${model.lines.length} line${model.lines.length === 1 ? '' : 's'}` }))}
+
+          <div style="height:14px"></div>
+
+          ${raw(dispatchCard(o))}
+
+          <div style="height:14px"></div>
+
+          ${raw(invoiceCard(o))}
 
           <div style="height:14px"></div>
 
@@ -365,6 +457,24 @@ async function detail(el, id) {
     el.querySelector('#back').addEventListener('click', () => {
       if (dirty && !confirm('Leave without saving?')) return;
       location.hash = '#/orders';
+    });
+
+    // Wired before the early return below: a dispatched order is not editable,
+    // and it is exactly the order whose dispatches someone wants to open.
+    el.querySelectorAll('tr[data-dispatch]').forEach((row) =>
+      row.addEventListener('click', () => { location.hash = `#/dispatch?id=${row.dataset.dispatch}`; })
+    );
+    el.querySelectorAll('tr[data-invoice]').forEach((row) =>
+      row.addEventListener('click', () => { location.hash = `#/invoices?id=${row.dataset.invoice}`; })
+    );
+    el.querySelector('#pick')?.addEventListener('click', async () => {
+      const btn = el.querySelector('#pick');
+      if (dirty && !confirm('This order has unsaved changes. Start picking anyway?')) return;
+      btn.disabled = true;
+      try {
+        const d = await api('/dispatches', { method: 'POST', body: JSON.stringify({ orderId: o.id }) });
+        location.hash = `#/dispatch?id=${d.id}`;
+      } catch (e) { btn.disabled = false; alert(e.message); }
     });
 
     if (!editable) return;

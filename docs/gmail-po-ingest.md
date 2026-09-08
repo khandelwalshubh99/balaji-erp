@@ -1,3 +1,13 @@
+> **Superseded by [`gmail-mail-ingest.md`](gmail-mail-ingest.md).**
+>
+> That sweep logs every mail, not just purchase orders: it threads an enquiry,
+> your quotation and the eventual PO onto one record, gives enquiries a BE/Q
+> number as well as giving orders a BE/SO number, and holds back anything it
+> cannot classify instead of guessing.
+>
+> This endpoint still works and is not going anywhere, so an Apps Script already
+> wired to it keeps running while you switch over. What follows describes it.
+
 # Pushing purchase orders in from Gmail
 
 Your Apps Script already finds POs in Gmail and writes them to a sheet with a

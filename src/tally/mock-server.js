@@ -66,6 +66,33 @@ function companiesXml(company) {
   );
 }
 
+/**
+ * The group tree, mirroring how a real company nests its parties.
+ *
+ * Every sub-group here names its PARENT and leaves PRIMARYGROUP empty, which is
+ * the harder of the two shapes the client has to cope with: it forces the walk
+ * up the chain rather than handing over the answer in one field.
+ */
+function groupsXml(company) {
+  const parents = new Set(company.ledgers.map((l) => l.parent).filter(Boolean));
+  const primaries = ['Sundry Debtors', 'Sundry Creditors'];
+
+  const rows = [];
+  for (const name of primaries) {
+    rows.push(`<GROUP NAME="${esc(name)}" RESERVEDNAME="${esc(name)}"><PARENT></PARENT><PRIMARYGROUP></PRIMARYGROUP></GROUP>`);
+  }
+  for (const name of parents) {
+    if (primaries.includes(name)) continue;
+    // Anything that is not a party sub-group hangs off itself and resolves to
+    // neither, which is what Tally reports for Bank and expense groups too.
+    const under = /debtor|trader|customer/i.test(name) ? 'Sundry Debtors' : '';
+    rows.push(
+      `<GROUP NAME="${esc(name)}" RESERVEDNAME=""><PARENT>${esc(under)}</PARENT><PRIMARYGROUP></PRIMARYGROUP></GROUP>`
+    );
+  }
+  return envelope(`<COLLECTION>\n${rows.join('\n')}\n</COLLECTION>`);
+}
+
 function ledgersXml(company) {
   const rows = company.ledgers
     .map(
@@ -245,6 +272,8 @@ export function createMockTallyServer({ seed = 'balaji-2026', failureRate = 0, l
       switch (id) {
         case 'List of Companies':
           return send(companiesXml(company));
+        case 'BE List of Groups':
+          return send(groupsXml(company));
         case 'BE List of Ledgers':
           return send(ledgersXml(company));
         case 'BE List of StockItems':
@@ -262,11 +291,35 @@ export function createMockTallyServer({ seed = 'balaji-2026', failureRate = 0, l
   return { server, company, imported };
 }
 
+/**
+ * Start the fake Tally, standing aside if its port is already taken.
+ *
+ * A second instance of the app — a demo alongside the working one, two chats,
+ * a colleague's copy — would otherwise die on boot with EADDRINUSE from a
+ * simulated dependency, which is an absurd reason to be unable to look at the
+ * dashboard. So it moves to whatever port is free and reports where it went.
+ *
+ * This applies to the SIMULATION ONLY, and the distinction matters. In live
+ * mode there is no listener here at all: TALLY_PORT is the port TallyPrime is
+ * serving on over on the office machine, and quietly "falling back" to a
+ * different one would mean connecting to nothing while claiming success.
+ */
 export function startMockTally(opts = {}) {
   const { server, ...rest } = createMockTallyServer(opts);
-  const port = opts.port ?? 9000;
+  const wanted = opts.port ?? 9000;
   return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => resolve({ server, port, ...rest }));
+    const onError = (err) => {
+      if (err.code !== 'EADDRINUSE') return reject(err);
+      console.warn(`[tally] port ${wanted} is already in use — the simulated Tally is taking a free port instead.`);
+      // 0 asks the OS for any free port; the app then reads it back off the
+      // server rather than guessing, so the client is pointed at the real one.
+      server.listen(0, '127.0.0.1', settled);
+    };
+    const settled = () => {
+      server.off('error', onError);
+      resolve({ server, port: server.address().port, ...rest });
+    };
+    server.on('error', onError);
+    server.listen(wanted, '127.0.0.1', settled);
   });
 }

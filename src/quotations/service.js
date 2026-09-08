@@ -7,6 +7,8 @@
  * overwritten, and a record that outlives one browser's localStorage.
  */
 import { db } from '../db/index.js';
+import { queueQuotation, queue } from '../sheets/store.js';
+import { mintNumber } from '../lib/numbering.js';
 import { todayISO, addDaysISO } from '../lib/dates.js';
 
 const nowIso = () => new Date().toISOString();
@@ -16,12 +18,6 @@ const nowIso = () => new Date().toISOString();
  * so both come from here and cannot drift apart.
  */
 export const QUOTE_VALIDITY_DAYS = 15;
-
-/** Financial-year tag, Tally style: April 2026 -> "2627". */
-function fyTag(date = new Date()) {
-  const y = date.getMonth() + 1 >= 4 ? date.getFullYear() : date.getFullYear() - 1;
-  return `${String(y).slice(2)}${String(y + 1).slice(2)}`;
-}
 
 /**
  * Resolve a quotation's two dates.
@@ -52,15 +48,7 @@ function datesFor({ quoteDate, validUntil } = {}, existing = null) {
 }
 
 export function nextQuoteNumber() {
-  const prefix = `BE/Q/${fyTag()}/`;
-  const rows = db
-    .prepare(`SELECT DISTINCT quote_number FROM quotations WHERE quote_number LIKE ?`)
-    .all(`${prefix}%`);
-  const highest = rows.reduce((max, r) => {
-    const n = Number(String(r.quote_number).slice(prefix.length));
-    return Number.isFinite(n) && n > max ? n : max;
-  }, 0);
-  return `${prefix}${String(highest + 1).padStart(4, '0')}`;
+  return mintNumber({ prefix: 'BE/Q', table: 'quotations', column: 'quote_number', what: 'quotation number' });
 }
 
 /**
@@ -121,26 +109,39 @@ function writeLines(quotationId, lines) {
 }
 
 function logEvent(entity, id, to, actor, note) {
-  db.prepare(
+  const info = db.prepare(
     `INSERT INTO pipeline_events (entity_type, entity_id, from_stage, to_stage, note, actor_id, actor_name)
      VALUES (?, ?, NULL, ?, ?, ?, ?)`
   ).run(entity, id, to, note || null, actor?.id || null, actor?.name || null);
+  queue('pipeline_events', info.lastInsertRowid);
 }
 
-export function createQuotation({ customerName, customerGuid, rfqId, lines = [], notes, terms, quoteDate, validUntil }, actor) {
+export function createQuotation(
+  {
+    customerName, customerGuid, rfqId, lines = [], notes, terms, quoteDate, validUntil,
+    // Where it came from, mirroring an order. An enquiry that arrived by mail
+    // keys on the message it came from, and that key is uniquely indexed, so
+    // the same mail can never quietly burn two quote numbers.
+    source = 'manual', sourceRef = null, documentUrl = null,
+  },
+  actor
+) {
   const t = totalsFor(lines);
   const quoteNumber = nextQuoteNumber();
   const d = datesFor({ quoteDate, validUntil });
   const info = db
     .prepare(`
       INSERT INTO quotations (quote_number, version, is_current, rfq_id, customer_name, customer_guid,
-        status, quote_date, valid_until, subtotal, tax_amount, total, notes)
-      VALUES (?, 1, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`)
+        status, quote_date, valid_until, subtotal, tax_amount, total, notes,
+        source, source_ref, document_url)
+      VALUES (?, 1, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(quoteNumber, rfqId || null, customerName, customerGuid || null, d.quoteDate, d.validUntil,
-      t.subtotal, t.taxAmount, t.total, notes ?? terms ?? null);
+      t.subtotal, t.taxAmount, t.total, notes ?? terms ?? null,
+      source, sourceRef, documentUrl);
   const id = info.lastInsertRowid;
   writeLines(id, lines);
   logEvent('quotation', id, 'draft', actor, `${quoteNumber} created`);
+  queueQuotation(id);
   return getQuotation(id);
 }
 
@@ -165,6 +166,7 @@ export function updateQuotation(id, { customerName, customerGuid, lines, notes, 
     .run(customerName ?? null, customerGuid ?? null, notes ?? null,
       d.quoteDate, d.validUntil, t.subtotal, t.taxAmount, t.total, id);
   if (lines) writeLines(id, lines);
+  queueQuotation(id);
   return getQuotation(id);
 }
 
@@ -179,16 +181,24 @@ export function reviseQuotation(id, actor) {
       .run(current.quote_number);
     // A revision goes out today, so it is re-dated and its validity restarts.
     const d = datesFor({});
+    // The revision keeps where the quotation came from, but not the key that
+    // came with it: source_ref belongs to the one row the mail actually
+    // created, and is uniquely indexed.
     const info = db.prepare(`
       INSERT INTO quotations (quote_number, version, is_current, rfq_id, customer_name, customer_guid,
-        status, quote_date, valid_until, subtotal, tax_amount, total, notes)
-      VALUES (?, ?, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`)
+        status, quote_date, valid_until, subtotal, tax_amount, total, notes, source, document_url)
+      VALUES (?, ?, 1, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(current.quote_number, current.version + 1, current.rfq_id, current.customer_name,
         current.customer_guid, d.quoteDate, d.validUntil, current.subtotal, current.tax_amount,
-        current.total, current.notes);
+        current.total, current.notes, current.source || 'manual', current.document_url || null);
     const newId = info.lastInsertRowid;
     writeLines(newId, lines.map(toLineInput));
     logEvent('quotation', newId, 'draft', actor, `revision ${current.version + 1} of ${current.quote_number}`);
+    // Both rows go up: the revision, and the one it just superseded. Pushing
+    // only the new one would leave the sheet showing two current versions of
+    // the same quotation, which is worse than showing neither.
+    queueQuotation(current.id);
+    queueQuotation(newId);
     return getQuotation(newId);
   })();
 }
@@ -207,6 +217,7 @@ export function setStatus(id, status, { lostReason } = {}, actor) {
     db.prepare(`UPDATE rfqs SET status = 'quoted', updated_at = datetime('now') WHERE id = ? AND status = 'open'`).run(q.rfq_id);
   }
   logEvent('quotation', id, status, actor, status === 'lost' ? lostReason : null);
+  queueQuotation(id);
   return getQuotation(id);
 }
 

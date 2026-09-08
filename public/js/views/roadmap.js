@@ -30,19 +30,19 @@ const PHASES = [
   {
     n: '2c',
     name: 'Picking, dispatch and LR',
-    state: 'next',
-    what: 'What actually leaves the godown, against what was ordered: short shipments and substitutions recorded as they happen, with the LR and transporter. Order status is already derived from this, so the plumbing is in place.',
+    state: 'built',
+    what: 'What actually leaves the godown, against what was ordered. A pick list starts from the outstanding quantity; a short pick is one number, recorded as it happens. Substitutions name what actually went while still answering the ordered line. The LR can be added after the vehicle has gone, and until it is, the consignment sits in a queue that will not clear itself. Order status derives from all of it.',
   },
   {
     n: '2d',
     name: 'Invoice and payment due',
-    state: 'later',
-    what: 'Each dispatch invoiced, each invoice tied to its Tally bill, and the payment clock read from Tally rather than run here.',
+    state: 'built',
+    what: 'Each consignment invoiced, each invoice tied to its Tally bill, and the payment clock read from Tally every time it is shown rather than run here. Invoice numbers are Tally\u2019s — issuing our own would create a second sequence disagreeing with the filed GST one. An invoice with no bill behind it sits in a queue saying so, and a same-numbered bill against a different party is offered to a person rather than linked by a rule.',
   },
   {
     n: '3',
     name: 'Write-back to Tally',
-    state: 'later',
+    state: 'next',
     what: 'A cleared order creates its own sales voucher in Tally. Only worth starting once Phase 2 data is trusted — write-back errors cost far more to unwind.',
   },
   {

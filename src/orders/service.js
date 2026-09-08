@@ -18,30 +18,22 @@
  *   several lots, and nobody should have to remember to mark it part-shipped.
  */
 import { db } from '../db/index.js';
+import { queueOrder, queue } from '../sheets/store.js';
+import { mintNumber } from '../lib/numbering.js';
 import { todayISO } from '../lib/dates.js';
 import { customerCredit } from '../customers/service.js';
 import { priceLine, totalsFor, getQuotation } from '../quotations/service.js';
 
-function fyTag(date = new Date()) {
-  const y = date.getMonth() + 1 >= 4 ? date.getFullYear() : date.getFullYear() - 1;
-  return `${String(y).slice(2)}${String(y + 1).slice(2)}`;
-}
-
 export function nextOrderNumber() {
-  const prefix = `BE/SO/${fyTag()}/`;
-  const rows = db.prepare('SELECT order_number FROM orders WHERE order_number LIKE ?').all(`${prefix}%`);
-  const highest = rows.reduce((max, r) => {
-    const n = Number(String(r.order_number).slice(prefix.length));
-    return Number.isFinite(n) && n > max ? n : max;
-  }, 0);
-  return `${prefix}${String(highest + 1).padStart(4, '0')}`;
+  return mintNumber({ prefix: 'BE/SO', table: 'orders', column: 'order_number', what: 'order number' });
 }
 
 function logEvent(entityId, orderId, to, actor, note) {
-  db.prepare(
+  const info = db.prepare(
     `INSERT INTO pipeline_events (entity_type, entity_id, order_id, from_stage, to_stage, note, actor_id, actor_name)
      VALUES ('order', ?, ?, NULL, ?, ?, ?, ?)`
   ).run(entityId, orderId, to, note || null, actor?.id || null, actor?.name || null);
+  queue('pipeline_events', info.lastInsertRowid);
 }
 
 function writeLines(orderId, lines) {
@@ -111,7 +103,10 @@ export function deriveStatus(orderId) {
 
 function refreshStatus(orderId) {
   const status = deriveStatus(orderId);
-  if (status) db.prepare(`UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, orderId);
+  if (status) {
+    db.prepare(`UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, orderId);
+    queue('orders', orderId);
+  }
   return status;
 }
 
@@ -239,6 +234,9 @@ export function createOrder(input, actor) {
                   WHERE id = ? AND status IN ('sent', 'draft')`).run(quotationId);
     }
     logEvent(id, id, 'open', actor, `${orderNumber} received${customerPoNumber ? ` against PO ${customerPoNumber}` : ''}`);
+    queueOrder(id);
+    // The quotation was marked accepted above, so it has changed too.
+    if (quotationId) queue('quotations', quotationId);
     return getOrder(id);
   })();
 }
@@ -287,6 +285,7 @@ export function updateOrder(id, input, actor) {
       t.subtotal, t.taxAmount, t.total, id);
 
   if (input.lines) writeLines(id, input.lines);
+  queueOrder(id);
   return getOrder(id);
 }
 
@@ -299,6 +298,7 @@ export function cancelOrder(id, reason, actor) {
   db.prepare(`UPDATE orders SET status = 'cancelled', cancelled_reason = ?, updated_at = datetime('now') WHERE id = ?`)
     .run(reason || null, id);
   logEvent(id, id, 'cancelled', actor, reason);
+  queueOrder(id);
   return getOrder(id);
 }
 

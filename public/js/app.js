@@ -5,10 +5,16 @@ const ROUTES = {
   stock: () => import('./views/stock.js'),
   catalogue: () => import('./views/catalogue.js'),
   quotations: () => import('./views/quotations.js'),
+  mail: () => import('./views/mail.js'),
   receivables: () => import('./views/receivables.js'),
   orders: () => import('./views/orders.js'),
+  dispatch: () => import('./views/dispatch.js'),
+  invoices: () => import('./views/invoices.js'),
   'tally-orders': () => import('./views/tally-orders.js'),
-  tally: () => import('./views/tally.js'),
+  connection: () => import('./views/connection.js'),
+  // The screen used to be called "Tally connection"; anything bookmarked under
+  // the old name still lands in the right place.
+  tally: () => import('./views/connection.js'),
   roadmap: () => import('./views/roadmap.js'),
 };
 

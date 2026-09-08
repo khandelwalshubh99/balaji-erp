@@ -321,12 +321,31 @@ export function buildCompany(seedStr, now = new Date(), stockSeed = null) {
 
   // --- Party ledgers ------------------------------------------------------
   const ledgers = [];
+
+  /**
+   * Customers do not all hang directly off Sundry Debtors, here or in the real
+   * books. The office files them under sub-groups named after whoever handles
+   * the account, and those names follow no rule: "Ajay Ji (Debtor)" is singular
+   * where Tally's own group is plural, and "TRADERS - INDORE" says nothing at
+   * all. Reading the group name got some of them and quietly missed the rest,
+   * so the simulation carries the same shape the office does — otherwise the
+   * only dataset that ever exercises the group-tree walk is the live one.
+   */
+  const DEBTOR_SUBGROUPS = [
+    'Sundry Debtors',
+    'Sundry Debtors',
+    'Ajay Ji (Debtor)',
+    'SALUJA JI (DEBTORS)',
+    'TRADERS - INDORE',
+    'CUSTOMER/SUPLIER',
+  ];
+
   const customers = CUSTOMER_NAMES.map((name, i) => {
     const creditDays = pick([15, 30, 30, 30, 30, 45, 60]);
     const l = {
       guid: `sim-led-c-${i + 1}`,
       name,
-      parent: 'Sundry Debtors',
+      parent: pick(DEBTOR_SUBGROUPS),
       isCustomer: true,
       creditPeriodDays: creditDays,
       // Most accounts have a limit set; a handful are deliberately open, and a

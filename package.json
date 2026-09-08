@@ -15,7 +15,16 @@
     "sync:once": "node scripts/sync-once.js",
     "db:reset": "node scripts/db-reset.js",
     "catalogue:import": "node scripts/import-catalogue.js",
-    "catalogue:match": "node scripts/match-catalogue.js"
+    "catalogue:match": "node scripts/match-catalogue.js",
+    "mail:test": "node scripts/mail-pipeline-test.js",
+    "mail:demo": "npm run mail:test && DB_PATH=data/mail-test.db PORT=${PORT:-4100} TALLY_PORT=${TALLY_PORT:-9100} SYNC_ON_BOOT=false MAIL_OWN_DOMAINS=${MAIL_OWN_DOMAINS:-rbalajient.com} MAIL_OWN_ADDRESSES=${MAIL_OWN_ADDRESSES:-rbalajient1@gmail.com,rbalajient@rediffmail.com} INGEST_TOKEN=${INGEST_TOKEN:-demo-token-local-only} node src/server.js",
+    "dispatch:test": "node scripts/dispatch-test.js",
+    "invoice:test": "node scripts/invoice-test.js",
+    "sheets:verify": "node scripts/sheets-verify.js",
+    "sheets:mock": "node scripts/run-mock-sheet.js",
+    "sheets:demo": "DB_PATH=data/sheets-demo.db PORT=${PORT:-4200} TALLY_PORT=${TALLY_PORT:-9300} MOCK_SHEET_PORT=${MOCK_SHEET_PORT:-9200} node scripts/sheets-demo.js",
+    "sheets:push": "node scripts/sheets-push.js",
+    "sheets:pull": "node scripts/sheets-pull.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.5.0",

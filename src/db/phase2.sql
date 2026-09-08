@@ -266,3 +266,15 @@ CREATE INDEX IF NOT EXISTS idx_catalogue_name ON catalogue_items(name);
 CREATE INDEX IF NOT EXISTS idx_catalogue_brand ON catalogue_items(brand);
 CREATE INDEX IF NOT EXISTS idx_catalogue_tally ON catalogue_items(tally_guid);
 CREATE INDEX IF NOT EXISTS idx_catalogue_match ON catalogue_items(match_method);
+
+-- --- App settings -----------------------------------------------------------
+-- Configuration a person changes from a screen, as opposed to the .env values
+-- that belong to whoever runs the server. Small on purpose: things like which
+-- Google Sheet the mail sweep writes to, which is useful to correct without a
+-- restart and pointless to hard-code.
+CREATE TABLE IF NOT EXISTS app_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_by INTEGER REFERENCES users(id)
+);

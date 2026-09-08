@@ -13,6 +13,7 @@ import { db } from '../db/index.js';
 import { config } from '../config.js';
 import { tally } from '../tally/client.js';
 import { matchCatalogue } from '../catalogue/match.js';
+import { matchAll as matchInvoices } from '../invoices/service.js';
 
 const now = () => new Date().toISOString();
 
@@ -204,6 +205,23 @@ export async function runSync(trigger = 'manual') {
     } catch (err) {
       recordDataset.run(runId, 'catalogue-match', 'failed', 0, Date.now() - d0, err.message);
       results.push({ dataset: 'catalogue-match', label: 'Catalogue match', status: 'failed', records: 0, ms: Date.now() - d0, error: err.message });
+    }
+  }
+
+  // Bills have just changed, so invoices that could not be matched before may
+  // match now — an invoice raised this morning is unmatched until the sync that
+  // brings its bill in. Only the unmatched are reconsidered; see matchAll().
+  const billsOk = results.find((r) => r.dataset === 'bills')?.status === 'ok';
+  if (billsOk) {
+    const d0 = Date.now();
+    try {
+      const m = matchInvoices();
+      recordDataset.run(runId, 'invoice-match', 'ok', m.matched, Date.now() - d0,
+        `${m.matched} of ${m.considered} unmatched invoices found their bill`);
+      results.push({ dataset: 'invoice-match', label: 'Invoice match', status: 'ok', records: m.matched, ms: Date.now() - d0 });
+    } catch (err) {
+      recordDataset.run(runId, 'invoice-match', 'failed', 0, Date.now() - d0, err.message);
+      results.push({ dataset: 'invoice-match', label: 'Invoice match', status: 'failed', records: 0, ms: Date.now() - d0, error: err.message });
     }
   }
 

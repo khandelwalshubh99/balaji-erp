@@ -11,7 +11,9 @@ import * as req from './requests.js';
 import {
   decodeTallyBuffer,
   parseCompanies,
+  parseGroups,
   parseLedgers,
+  buildGroupClassifier,
   parseStockItems,
   parseBills,
   parseVouchers,
@@ -116,7 +118,39 @@ export const tally = {
     }
   },
 
-  ledgers: () => call(req.listLedgers(config.tally.company), parseLedgers),
+  /**
+   * Ledgers, classified against the real group tree.
+   *
+   * Two round trips rather than one, because a ledger's own record does not say
+   * whether it is a customer: it names its immediate group, and the office keeps
+   * customers under groups named after whoever handles them. The tree is fetched
+   * first so each ledger can be resolved up to a primary group.
+   *
+   * A failed group fetch is not fatal. It falls back to reading the group name,
+   * which classifies fewer ledgers but keeps a sync running, and says so.
+   */
+  async ledgers() {
+    let classify = null;
+    let groupsError = null;
+    try {
+      const res = await sendXml(req.listGroups(config.tally.company));
+      const groups = parseGroups(res.xml);
+      if (groups.length) classify = buildGroupClassifier(groups);
+      else groupsError = 'Tally returned no groups';
+    } catch (err) {
+      groupsError = err.message;
+    }
+    if (groupsError) {
+      console.warn(`[tally] group tree unavailable (${groupsError}); falling back to group-name matching, which classifies fewer parties.`);
+    }
+    const res = await sendXml(req.listLedgers(config.tally.company));
+    return {
+      records: parseLedgers(res.xml, classify),
+      raw: res.xml,
+      elapsedMs: res.elapsedMs,
+      classifiedByTree: Boolean(classify),
+    };
+  },
   stockItems: () => call(req.listStockItems(config.tally.company), parseStockItems),
   billsReceivable: () => call(req.listBillsReceivable(config.tally.company), parseBills),
   dayBook: (from, to) => call(req.dayBook(config.tally.company, from, to), parseVouchers),

@@ -23,7 +23,7 @@ try {
     if (r.companies.length) console.log('Companies:', r.companies.map((c) => c.name).join(', '));
     process.exitCode = r.ok && r.companyFound ? 0 : 1;
   } else {
-    const fn = { ledgers: 'ledgers', stock: 'stockItems', bills: 'billsReceivable' }[which];
+    const fn = { ledgers: 'ledgers', stock: 'stockItems', bills: 'billsReceivable', daybook: 'dayBook' }[which];
     if (!fn) throw new Error(`Unknown dataset '${which}'. Try: ping | ledgers | stock | bills | daybook`);
     const r = which === 'daybook'
       ? await tally.dayBook(new Date(Date.now() - 7 * 86400000), new Date())
