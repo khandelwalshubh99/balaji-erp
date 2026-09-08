@@ -51,6 +51,14 @@ export function syncHistory(limit = 25) {
 }
 
 // --- stock -----------------------------------------------------------------
+/** The sorts the stock screen offers. Lifted out so it can be membership-tested. */
+const SORT_COLUMNS = {
+  name: 'name ASC',
+  qty: 'closing_qty ASC',
+  value: 'closing_value DESC',
+  category: 'category ASC, name ASC',
+};
+
 export function stockCategories() {
   return db
     .prepare(`SELECT category, COUNT(*) AS items FROM tally_stock_items GROUP BY category ORDER BY category`)
@@ -80,9 +88,12 @@ export function stockItems({ search = '', category = '', status = 'all', sort = 
   else if (status === 'ok') where.push(`closing_qty > ${level}`);
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const orderBy =
-    { name: 'name ASC', qty: 'closing_qty ASC', value: 'closing_value DESC', category: 'category ASC, name ASC' }[sort] ||
-    'name ASC';
+  // Own keys only. `sort` arrives from the query string, and a plain object
+  // will happily answer for `constructor` or `toString` with something
+  // inherited and truthy — which then reaches the SQL as the stringified
+  // Object constructor and throws a syntax error rather than falling back.
+  // ?sort=nonsense already sorted by name; ?sort=constructor returned a 500.
+  const orderBy = (Object.hasOwn(SORT_COLUMNS, sort) && SORT_COLUMNS[sort]) || SORT_COLUMNS.name;
 
   const rows = db
     .prepare(

@@ -100,10 +100,20 @@ apiRouter.get('/tally/probes', (_req, res) =>
 
 apiRouter.post('/tally/probe', async (req, res) => {
   const key = String(req.body?.probe || '');
-  const probe = PROBES[key];
+  // Own keys only. A plain object answers for `constructor`, `toString`,
+  // `valueOf` and `__proto__` with something inherited and truthy, which walked
+  // straight past a `!probe` guard and then died on `.build()`. In an async
+  // handler Express 4 does not catch that, so the request never got a response
+  // at all — it sat open until the browser gave up.
+  const probe = Object.hasOwn(PROBES, key) ? PROBES[key] : null;
   if (!probe) return res.status(400).json({ error: `Unknown probe '${key}'` });
-  const request = probe.build();
+  // Declared out here so the failure path can still show what was sent — or
+  // report that building it is what failed, when this is still null.
+  let request = null;
   try {
+    // Built inside the try, so a builder that throws is reported like any other
+    // probe failure rather than hanging the request.
+    request = probe.build();
     const t0 = Date.now();
     const out = await tally.raw(request);
     res.json({

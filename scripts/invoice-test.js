@@ -26,6 +26,8 @@ seedUsers();
 const orders = await import('../src/orders/service.js');
 const dispatch = await import('../src/dispatch/service.js');
 const invoices = await import('../src/invoices/service.js');
+// The same local-date helper the services use, so the test cannot drift from them.
+const { toISO } = await import('../src/lib/dates.js');
 
 let n = 0, fails = 0;
 const ok = (cond, label, extra = '') => {
@@ -41,7 +43,22 @@ const throws = (fn, match, label) => {
 
 const actor = { id: 1, name: 'Shubh Khandelwal' };
 const now = new Date().toISOString();
-const iso = (daysAgo) => new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
+/**
+ * A calendar date N days back, in LOCAL time.
+ *
+ * This used to go via toISOString(), which is UTC, and so disagreed with the
+ * service under test for the first five and a half hours of every IST day: at
+ * 01:00 the UTC date is still yesterday, `iso(45)` handed back a date 46 local
+ * days old, and "45 days past due" failed. The suite passed all afternoon and
+ * failed at night, which is the worst way for a test to be wrong. Everything
+ * user-facing in this app is a plain local calendar date — see src/lib/dates.js
+ * — so the test has to measure them the same way the code does.
+ */
+const iso = (daysAgo) => {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return toISO(d);
+};
 
 for (const [guid, name] of [['g-1', 'Sanghvi Industries Pvt Ltd'], ['g-2', 'Ashok Auto Works']]) {
   db.prepare(`INSERT INTO tally_ledgers (guid,name,is_customer,credit_limit,outstanding,credit_period_days,synced_at)
