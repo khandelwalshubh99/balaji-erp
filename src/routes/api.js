@@ -5,11 +5,12 @@ import { runSync, syncStatus } from '../sync/engine.js';
 import { tally } from '../tally/client.js';
 import { searchCatalogue, catalogueFacets, matchSummary, unmatchedItems, orphanStockItems, matchCatalogue, lastRateFor } from '../catalogue/match.js';
 import * as quotes from '../quotations/service.js';
-import { listCustomers, customerCredit } from '../customers/service.js';
+import { listCustomers, customerCredit, knownSegments, listCustomerSegments, setCustomerSegment } from '../customers/service.js';
 import * as orders from '../orders/service.js';
 import * as dispatch from '../dispatch/service.js';
 import * as invoices from '../invoices/service.js';
 import * as mail from '../mail/service.js';
+import * as analytics from '../analytics/service.js';
 import { getSetting, setSetting, parseSheetId, sheetUrlFor } from '../settings/service.js';
 import * as sheets from '../sheets/store.js';
 import { renderQuotationHtml, renderQuotationText, DEFAULT_TERMS } from '../quotations/render.js';
@@ -20,6 +21,33 @@ export const apiRouter = Router();
 const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
 
 apiRouter.get('/overview', (_req, res) => res.json(q.overview()));
+
+// --- dashboard (the commercial view) ----------------------------------------
+/**
+ * One call, because these numbers are one question.
+ *
+ * Splitting it per metric would let the tier table be built from a different
+ * window than the gap lists that read off it, and "high tier customers not
+ * billed" would then disagree with the tier column beside it.
+ */
+apiRouter.get('/dashboard', (req, res) => {
+  res.json(
+    analytics.dashboard({
+      month: req.query.month ? String(req.query.month) : undefined,
+      windowMonths: Math.min(24, Math.max(2, num(req.query.window, 6))),
+      trendMonths: Math.min(36, Math.max(3, num(req.query.trend, 12))),
+    })
+  );
+});
+
+apiRouter.get('/dashboard/brands', (req, res) =>
+  res.json(
+    analytics.brandSales({
+      month: req.query.month ? String(req.query.month) : undefined,
+      months: Math.min(24, Math.max(2, num(req.query.months, 6))),
+    })
+  )
+);
 
 apiRouter.get('/stock', (req, res) => {
   const { search = '', category = '', status = 'all', sort = 'name' } = req.query;
@@ -135,6 +163,30 @@ const actorOf = (req) => req.session?.user || null;
 apiRouter.get('/customers', (req, res) =>
   res.json({ customers: listCustomers(String(req.query.search || '')) })
 );
+
+/**
+ * Which industry each customer is in, and the labels to choose from.
+ *
+ * Not a path parameter on the customer, because a ledger name is free text
+ * that can contain a slash — putting it in the URL is how "M/s Sharma Tools"
+ * becomes a 404 nobody can explain.
+ */
+apiRouter.get('/customer-segments', (_req, res) =>
+  res.json({ assignments: listCustomerSegments(), known: knownSegments() })
+);
+
+apiRouter.put('/customer-segments', (req, res) => {
+  try {
+    const out = setCustomerSegment(
+      String(req.body?.customerName || ''),
+      String(req.body?.segment ?? ''),
+      actorOf(req)
+    );
+    res.json({ ...out, known: knownSegments() });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
 apiRouter.get('/customers/:name/credit', (req, res) => {
   const credit = customerCredit(req.params.name, Number(req.query.value) || 0);

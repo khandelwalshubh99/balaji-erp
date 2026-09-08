@@ -236,6 +236,21 @@ export function salesTrend({ days = 30 } = {}) {
     .all(since);
 }
 
+/**
+ * A voucher line names its item, and nothing else — there is no stock guid on
+ * it — so the category has to be looked up by name. Tally's stock list does not
+ * treat that name as unique: "GROZ Socket" is six separate items, "Ring
+ * Spanners" two. Joining straight onto the table turns one line into six and
+ * counts its amount six times, which is why the lookup is collapsed to one row
+ * per name FIRST. With that in place the category amounts add back up to the
+ * billed total, which is the property worth protecting: a breakdown that does
+ * not sum to the figure beside it is worse than no breakdown.
+ *
+ * MIN() is arbitrary between duplicates and deliberately so. Today every
+ * repeated name sits in one category, so there is nothing to choose between;
+ * if that ever stops being true this picks the same category every time
+ * instead of letting the answer depend on row order.
+ */
 export function salesByCategory({ days = 30 } = {}) {
   const since = isoDaysAgo(days);
   return db
@@ -245,7 +260,10 @@ export function salesByCategory({ days = 30 } = {}) {
               COUNT(DISTINCT v.guid) AS invoices
        FROM tally_voucher_lines vl
        JOIN tally_vouchers v ON v.guid = vl.voucher_guid
-       LEFT JOIN tally_stock_items si ON si.name = vl.item_name
+       LEFT JOIN (
+         SELECT name AS item_name, MIN(category) AS category
+         FROM tally_stock_items GROUP BY name
+       ) si ON si.item_name = vl.item_name
        WHERE v.voucher_type = 'Sales' AND v.date >= ?
        GROUP BY category ORDER BY amount DESC`
     )

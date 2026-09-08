@@ -39,6 +39,25 @@ const child = (parentColumn) => ({ parent: parentColumn });
 
 export const TABS = [
   {
+    // First in the list because nothing depends on it and it is the one tab a
+    // person will want to fill in by hand: 65 customers are far quicker to
+    // categorise down a spreadsheet column than one at a time in a browser.
+    key: 'customer_segments',
+    tab: 'Customer Segments',
+    table: 'customer_segments',
+    label: 'Customer segments',
+    columns: [
+      ['ID', 'id', INT],
+      ['Customer', 'customer_name', TEXT],
+      ['Segment', 'segment', TEXT],
+      ['Customer GUID', 'customer_guid', TEXT],
+      ['Note', 'note', TEXT],
+      ['Updated By', 'updated_by', INT],
+      ['Created At', 'created_at', TEXT],
+      ['Updated At', 'updated_at', TEXT],
+    ],
+  },
+  {
     key: 'quotations',
     tab: 'Quotations',
     table: 'quotations',

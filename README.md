@@ -132,6 +132,61 @@ stop being loaded and can be deleted.
 
 ## What each screen is, and is not
 
+**Dashboard** — the commercial view: what was quoted against what was billed,
+which brands moved, and who is worth the phone call this week. Every rupee on it
+is a Tally sales voucher, so it reconciles with Tally and not with the order
+book; the app's own `invoices` rows record that a tax invoice was raised, which
+is a different question from what was billed.
+
+*Quoted against billed* is the one ratio Tally cannot answer on its own, because
+Tally has no idea a quotation exists. The quoted side therefore comes from
+quotations raised in this app — current version only, drafts excluded, dated by
+the date the customer sees. Until quoting moves onto this screen the ratio has
+nothing to divide by, and the screen says so in as many words rather than
+printing `0.00×` and letting somebody act on it.
+
+*Tiers* score every customer 1–5 on three things over a rolling window —
+**how many brands** they buy, **how often** they buy, and **what they are
+worth** each month — and add the three up. Platinum through Bronze. The scoring
+is **relative to the rest of the book**, not to a rupee figure in a config file:
+absolute bands need a number nobody has agreed yet, and would go wrong the first
+year the business grows. Ties are scored on the midpoint of the block they form,
+because most of the book buys from one or two brands and a top-edge rule would
+make the genuinely broad buyers indistinguishable from them.
+
+*Segments* are the customer's **industry** — pharmaceuticals, chemical,
+automobile, food and agro, and whatever else turns up next. Nothing computes
+this and nothing can: Tally has nowhere to record what a customer makes, and its
+ledger groups in this company are salesmen and territory (`SALUJA JI (DEBTORS)`,
+`TRADERS - INDORE`), so the industry is the app's own record, set once per
+customer from the *Segment* column of the customer table. The label is free text
+behind a dropdown of what is already in use — a plain text box gives you
+"Automobile", "automobile" and "Auto" as three industries inside a week, which
+is exactly the failure that makes the field useless for grouping.
+
+It answers the question tiers cannot: a tier says what one customer is worth,
+a segment says whether a bad month is *this customer* or *the whole of pharma*.
+Customers with nothing set are counted under **Unassigned** rather than dropped
+— a breakdown that silently omits a third of the book looks complete and is not,
+and the size of that bucket is the only honest measure of how far the
+categorising has got.
+
+Assignments live in `customer_segments`, which is a table of its own and not a
+column on `tally_ledgers`: that table is a mirror and every sync deletes rows
+out of it, so a segment stored there would survive until the next pull and then
+quietly vanish. With a Google Sheet connected they also ride the store as a
+**Customer Segments** tab, which is by far the fastest way to categorise sixty
+customers — a column in a spreadsheet rather than sixty dropdowns.
+
+Which is what the last two lists are for: **high-tier customers not billed** and
+**not quoted** this month, ordered by what they are typically worth in a month,
+so the size of the gap is on the row rather than in someone's head.
+
+The window is selectable (3, 6 or 12 months) and so is the month, and both tiers
+and segments are recomputed **as at the end of the month being shown** — looking
+back at July shows the standing that was true in July, rather than re-judging it
+with what happened afterwards.
+
 **Quotations** *(Phase 2)* — the replacement for the standalone quotation tool.
 Search the 12,261-SKU catalogue, see live Tally stock and **the rate this
 customer was last actually charged** against every line, and copy the finished
@@ -348,6 +403,8 @@ src/
     schema.sql         every tally_* table is a disposable mirror
     index.js           SQLite connection + user seeding
     queries.js         read models for the dashboard (never touches Tally)
+  analytics/service.js quoted-vs-billed, brand sales, customer tiers, segments
+  customers/service.js Tally's parties, plus the industry segment it cannot hold
   sync/engine.js       scheduled pull; per-dataset transactions and logging
   dispatch/service.js  picking, what left, the LR; order status derives from it
   invoices/service.js  the link to a Tally bill. No payment state is stored here

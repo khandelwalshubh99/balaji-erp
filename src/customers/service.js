@@ -1,11 +1,16 @@
 /**
- * Customers, as Tally knows them.
+ * Customers, as Tally knows them — plus the one thing it does not.
  *
- * Read-only: parties are created in Tally, never here. Quotations and orders
- * both need this, so it does not belong inside either of them.
+ * Parties are created in Tally, never here, so everything read out of
+ * `tally_ledgers` below is read-only. The exception is the industry segment at
+ * the bottom of this file: Tally has nowhere to put "this customer is a
+ * pharmaceuticals plant", so that is the app's own record and is written here.
+ *
+ * Quotations and orders both need this, so it does not belong inside either.
  */
 import { db } from '../db/index.js';
 import { config } from '../config.js';
+import { queue } from '../sheets/store.js';
 
 export function listCustomers(search = '') {
   const params = {};
@@ -112,4 +117,112 @@ export function matchCustomer(name) {
   }
 
   return { matched: false, name: given, guid: null, method: 'unmatched' };
+}
+
+
+// --- Industry segment -------------------------------------------------------
+/**
+ * What industry a customer is in — pharmaceuticals, chemical, automobile, food
+ * and agro, and whatever else turns up next.
+ *
+ * This is NOT the tier. A tier is worked out from what a customer buys and is
+ * recalculated every time the screen loads; a segment is a fact about the
+ * customer that somebody types in once and that no amount of trading history
+ * would ever reveal. The two answer different questions — "how much is this
+ * customer worth" against "who are we actually selling to" — and the second is
+ * the one that says whether a bad month is this customer or the whole of pharma.
+ */
+
+/**
+ * A starting list, not the list.
+ *
+ * Offered in the dropdown so the common ones are one click rather than typed
+ * eight different ways ("Automobile", "Auto", "automotive"), which is the
+ * failure that makes a free-text field useless for grouping. Anything not here
+ * can still be typed, and once typed it joins the list for everyone.
+ */
+export const SUGGESTED_SEGMENTS = [
+  'Pharmaceuticals',
+  'Chemical',
+  'Automobile',
+  'Food and Agro',
+  'Engineering and Fabrication',
+  'Textiles',
+  'Plastics and Packaging',
+  'Cement and Construction',
+  'Power and Electrical',
+  'Trader / Reseller',
+  'Government and PSU',
+];
+
+/** Every segment on the screen: the suggestions, plus whatever is in use. */
+export function knownSegments() {
+  const inUse = db
+    .prepare(`SELECT segment, COUNT(*) AS customers FROM customer_segments
+              WHERE TRIM(segment) <> '' GROUP BY segment ORDER BY segment`)
+    .all();
+  const names = new Set(inUse.map((r) => r.segment));
+  return {
+    inUse,
+    // Suggestions already in use are not offered twice.
+    suggested: SUGGESTED_SEGMENTS.filter((s) => !names.has(s)),
+    all: [...new Set([...inUse.map((r) => r.segment), ...SUGGESTED_SEGMENTS])].sort(),
+  };
+}
+
+/** customer name -> segment, for anything that needs to group by it. */
+export function segmentByCustomer() {
+  return new Map(
+    db
+      .prepare(`SELECT customer_name, segment FROM customer_segments WHERE TRIM(segment) <> ''`)
+      .all()
+      .map((r) => [r.customer_name, r.segment])
+  );
+}
+
+export function listCustomerSegments() {
+  return db.prepare('SELECT * FROM customer_segments ORDER BY customer_name').all();
+}
+
+/**
+ * Assign a customer to an industry, or clear it.
+ *
+ * An empty segment deletes the row rather than storing a blank one, so
+ * "unassigned" is the absence of a record and there is only one way to spell it.
+ * The customer name is checked against the ledgers: a segment filed under a
+ * misspelt name would never match a sales voucher and would sit there looking
+ * like the work had been done.
+ */
+export function setCustomerSegment(customerName, segment, actor) {
+  const name = String(customerName || '').trim();
+  if (!name) throw new Error('A customer is required.');
+
+  const ledger = db.prepare('SELECT guid FROM tally_ledgers WHERE name = ? AND is_customer = 1').get(name);
+  if (!ledger) throw new Error(`'${name}' is not a customer in the synced ledgers.`);
+
+  const value = String(segment || '').trim();
+  const existing = db.prepare('SELECT id FROM customer_segments WHERE customer_name = ?').get(name);
+
+  if (!value) {
+    if (existing) {
+      db.prepare('DELETE FROM customer_segments WHERE id = ?').run(existing.id);
+      queue('customer_segments', existing.id, 'delete');
+    }
+    return { customerName: name, segment: null };
+  }
+
+  const info = db
+    .prepare(`
+      INSERT INTO customer_segments (customer_name, customer_guid, segment, updated_by)
+      VALUES (@name, @guid, @segment, @actor)
+      ON CONFLICT(customer_name) DO UPDATE SET
+        segment = excluded.segment,
+        customer_guid = excluded.customer_guid,
+        updated_by = excluded.updated_by,
+        updated_at = datetime('now')`)
+    .run({ name, guid: ledger.guid, segment: value, actor: actor?.id || null });
+
+  const id = existing ? existing.id : info.lastInsertRowid;
+  queue('customer_segments', id);
+  return { customerName: name, segment: value, id };
 }

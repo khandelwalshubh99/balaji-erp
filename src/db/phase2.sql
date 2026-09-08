@@ -267,6 +267,34 @@ CREATE INDEX IF NOT EXISTS idx_catalogue_brand ON catalogue_items(brand);
 CREATE INDEX IF NOT EXISTS idx_catalogue_tally ON catalogue_items(tally_guid);
 CREATE INDEX IF NOT EXISTS idx_catalogue_match ON catalogue_items(match_method);
 
+-- --- What industry a customer is in -----------------------------------------
+-- Tally cannot answer this. Its ledger groups here are salesmen and territory
+-- ("SALUJA JI (DEBTORS)", "TRADERS - INDORE"), not what the customer makes, so
+-- the industry is the app's own record and is typed in once per customer.
+--
+-- A SEPARATE TABLE, NOT A COLUMN ON tally_ledgers.
+-- That table is a mirror and every sync deletes rows out of it; a segment
+-- stored there would survive until the next pull and then quietly vanish.
+--
+-- The segment is free text on purpose. Nobody can write down the full list of
+-- industries a tools distributor sells into in advance, and an enum would mean
+-- a schema change every time a new one turns up — which in practice means
+-- somebody files the customer under the nearest wrong one instead.
+CREATE TABLE IF NOT EXISTS customer_segments (
+  id            INTEGER PRIMARY KEY,
+  -- Keyed on the name because that is what a voucher carries: Tally's sales
+  -- vouchers name the party and give no guid, so the name is the only thing
+  -- that joins a segment to what the customer actually bought.
+  customer_name TEXT NOT NULL UNIQUE,
+  customer_guid TEXT,
+  segment       TEXT NOT NULL,
+  note          TEXT,
+  updated_by    INTEGER REFERENCES users(id),
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_customer_segments_segment ON customer_segments(segment);
+
 -- --- App settings -----------------------------------------------------------
 -- Configuration a person changes from a screen, as opposed to the .env values
 -- that belong to whoever runs the server. Small on purpose: things like which

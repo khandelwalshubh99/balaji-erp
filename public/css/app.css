@@ -291,3 +291,42 @@ pre.xml {
 
 .status-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
+/* --- dashboard ----------------------------------------------------------- */
+.dual-bar { display: grid; gap: 3px; }
+
+.share-cell { display: grid; grid-template-columns: 1fr 38px; gap: 8px; align-items: center; }
+.share-cell span { font-size: 11.5px; text-align: right; font-variant-numeric: tabular-nums; }
+
+.minispark { width: 96px; }
+.minispark .spark { height: 26px; }
+
+tr.row-selected > td { background: var(--accent-soft); }
+
+.tier-card { cursor: pointer; transition: border-color 0.12s ease; }
+.tier-card:hover { border-color: var(--border-strong); }
+.tier-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.tier-card .label { margin-bottom: 2px; }
+
+tr.seg-row { cursor: pointer; }
+tr.seg-row:hover > td { background: var(--surface-2); }
+
+.seg-cell { padding-right: 4px; }
+.seg-pick {
+  font: inherit; font-size: 12px; padding: 2px 4px; max-width: 165px;
+  border: 1px solid transparent; border-radius: 5px;
+  background: var(--surface-2); color: var(--text);
+}
+.seg-pick:hover { border-color: var(--border-strong); }
+.seg-pick:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.seg-pick:disabled { opacity: 0.6; }
+
+.card > header input[type="search"] {
+  padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; min-width: 170px;
+}
+
+/* The hashed segment colours are light pastels; dark mode needs the text
+   lifted off them rather than a second palette to keep in step. */
+@media (prefers-color-scheme: dark) {
+  .seg-pick option { background: var(--surface); color: var(--text); }
+}

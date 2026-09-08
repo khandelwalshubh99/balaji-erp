@@ -1,6 +1,7 @@
 import { api, ago, count, esc } from './util.js';
 
 const ROUTES = {
+  dashboard: () => import('./views/dashboard.js'),
   overview: () => import('./views/overview.js'),
   stock: () => import('./views/stock.js'),
   catalogue: () => import('./views/catalogue.js'),
@@ -22,8 +23,8 @@ const view = document.getElementById('view');
 const pageTitle = document.getElementById('page-title');
 
 function currentRoute() {
-  const name = (location.hash.replace(/^#\//, '') || 'overview').split('?')[0];
-  return ROUTES[name] ? name : 'overview';
+  const name = (location.hash.replace(/^#\//, '') || 'dashboard').split('?')[0];
+  return ROUTES[name] ? name : 'dashboard';
 }
 
 async function route() {
